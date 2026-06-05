@@ -1,0 +1,24 @@
+{
+  "supplier": "BEVCO (FL)",
+  "invoice_no": "AI-PREVIEW-001",
+  "date": "2026-06-05",
+  "narration": "AI-extracted purchase invoice",
+  "items": [
+    {
+      "item_name": "BAGPIPER 375 ML",
+      "item_code": "B00025",
+      "batch": "TEST-B001",
+      "ml": 375,
+      "packing": "24",
+      "strength_name": "25 UP",
+      "quantity": 2,
+      "rate": 100
+    }
+  ],
+  "tax": {
+    "code": "VAT",
+    "rate": 20,
+    "amount": 40
+  },
+  "total": 240
+}

@@ -1,0 +1,35 @@
+# Customer secrets and local configuration
+api_config.json
+
+# Runtime data and customer documents
+agent_data/
+uploads/
+app_output/
+json_output/
+schema_report.json
+extracted-result.json
+erp_mapping.*.json
+!erp_mapping.example.json
+*.pdf
+
+# Python and test artifacts
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+test_state*
+
+# Packaging artifacts
+build/
+dist/
+github_*/
+*.spec
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

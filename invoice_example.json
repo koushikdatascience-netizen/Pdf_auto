@@ -1,0 +1,18 @@
+{
+  "supplier": "ABC Traders",
+  "invoice_no": "INV-101",
+  "date": "2026-06-05",
+  "items": [
+    {
+      "name": "ITEM001",
+      "qty": 10,
+      "price": 100,
+      "batch": "B001"
+    }
+  ],
+  "tax": {
+    "gst_rate": 18,
+    "gst_amount": 180
+  },
+  "total": 1180
+}
