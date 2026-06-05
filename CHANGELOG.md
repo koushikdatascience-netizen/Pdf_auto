@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.0 - 2026-06-05
+
+- Added complete PDF-to-purchase-preview orchestration endpoint.
+- Added structured PDF extraction to normalized invoice adapter.
+- Added ERP supplier/item-master validation directly after PDF upload.
+- Added multi-manufacturer PDF support and `test_pdf_flow.ps1`.
+
 ## 1.1.0 - 2026-06-05
 
 - Added the required `trnidmst` parent transaction insert.

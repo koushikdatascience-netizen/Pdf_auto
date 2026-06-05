@@ -20,8 +20,11 @@ Set-ExecutionPolicy -Scope Process Bypass
 4. Review `schema_report.json`.
 5. Start the service with `.\start_agent.ps1`.
 6. Run `.\test_api_flow.ps1` for preview-only validation.
-7. Use `.\test_api_flow.ps1 -Insert` only against an approved test database.
-8. Confirm the inserted purchase appears correctly inside the ERP EXE and its
+7. Run `.\test_pdf_flow.ps1 -PdfFile "invoice.pdf"` to validate the complete
+   PDF-to-ERP-preview flow.
+8. Use `.\test_pdf_flow.ps1 -PdfFile "invoice.pdf" -Insert` only against an
+   approved test database.
+9. Confirm the inserted purchase appears correctly inside the ERP EXE and its
    reports before production use.
 
 ## Configuration Per Customer

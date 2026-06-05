@@ -30,6 +30,32 @@ INVOICE = {
     "total": 240,
 }
 
+EXTRACTED = {
+    "page_count": 1,
+    "extraction_method": "native_pdf_text_pymupdf",
+    "needs_ocr": False,
+    "header": {"demand_id": "PDF-TEST-001", "date": "05/06/2026"},
+    "items": [
+        {
+            "sl": 1,
+            "label_name": "BAGPIPER 375 ML",
+            "batch": "TEST-B001",
+            "capacity_ml": 375,
+            "quantity_cases": 2,
+            "mfg_amount": 200,
+            "manufacturer": "BEVCO (FL)",
+        }
+    ],
+    "manufacturer_groups": [
+        {
+            "manufacturer": "BEVCO (FL)",
+            "item_sl_numbers": [1],
+            "total_mfg_amount": 200,
+            "total_vat": 40,
+        }
+    ],
+}
+
 
 class FakeCursor:
     def __init__(self):
@@ -182,6 +208,22 @@ class IntegrationApiTests(unittest.TestCase):
         )
         self.assertEqual(replay.status_code, 200, replay.text)
         self.assertTrue(replay.json()["idempotent_replay"])
+
+    @patch("integration_api.main.extract_pdf", return_value=EXTRACTED)
+    def test_pdf_upload_creates_database_validated_purchase_preview(self, _):
+        response = self.client.post(
+            "/api/v1/purchases/from-pdf/preview",
+            headers=self.headers,
+            data={"companycode": "2", "yearcode": "8", "strict_total": "true"},
+            files={"pdf": ("invoice.pdf", b"%PDF-1.4 test", "application/pdf")},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertTrue(body["ready_for_insert"])
+        self.assertEqual(body["purchase_count"], 1)
+        self.assertEqual(body["purchases"][0]["preview"]["suppliercode"], "B00011")
+        self.assertEqual(body["purchases"][0]["preview"]["totamount"], "240.00")
+        self.assertIn("approval_token", body["purchases"][0])
 
 
 if __name__ == "__main__":

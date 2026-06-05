@@ -80,7 +80,35 @@ Check a running agent:
 .\health_check.ps1
 ```
 
-## Test The API
+## Complete PDF Flow
+
+The normal user input is a PDF. One API call performs:
+
+```text
+PDF upload
+-> PyMuPDF extraction
+-> structured product/supplier association
+-> normalized purchase JSON
+-> invoice validation
+-> ERP supplier/item-master validation
+-> approval-ready purchase preview
+```
+
+Preview a PDF without inserting:
+
+```powershell
+.\test_pdf_flow.ps1 -PdfFile "invoice.pdf"
+```
+
+After reviewing every generated purchase:
+
+```powershell
+.\test_pdf_flow.ps1 -PdfFile "invoice.pdf" -Insert
+```
+
+The user must type `INSERT` before database writes occur.
+
+## Test With Normalized JSON
 
 In a second PowerShell window, preview the included example invoice:
 
@@ -99,7 +127,7 @@ The script requires typing `INSERT` before writing to SQL Server.
 
 ## API Workflow
 
-1. Call `POST /api/v1/purchases/preview`.
+1. Upload the PDF to `POST /api/v1/purchases/from-pdf/preview`.
 2. Show the resolved supplier, items, tax, and totals to the user.
 3. Require explicit user approval.
 4. Call `POST /api/v1/purchases/insert` using the approval token.
@@ -166,6 +194,7 @@ Main modules:
 - `mapping_service.py`: supplier/item resolution.
 - `db.py`: approved SQL statements and concurrency-safe ID generation.
 - `purchase_service.py`: preview and transactional insertion.
+- `pdf_purchase_adapter.py`: extracted PDF to normalized purchase conversion.
 - `schema_check.py`: read-only ERP compatibility checker.
 
 ## Security

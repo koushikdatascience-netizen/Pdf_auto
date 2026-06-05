@@ -22,6 +22,7 @@ $files = @(
   "SECURITY.md",
   "PUBLISH_CHECKLIST.md",
   "CHANGELOG.md",
+  "EXE_INTEGRATION_GUIDE.md",
   "requirements-api.txt",
   "api_config.example.json",
   "install.ps1",
@@ -33,12 +34,14 @@ $files = @(
   "build_agent.ps1",
   "export_github_source.ps1",
   "test_api_flow.ps1",
+  "test_pdf_flow.ps1",
   "run_agent.py",
   "schema_check.py",
   "db.py",
   "validation.py",
   "mapping_service.py",
   "purchase_service.py",
+  "pdf_purchase_adapter.py",
   "extract_pdf_json.py",
   "challan_adapter.py",
   "purchase_db.py",
@@ -51,7 +54,8 @@ $files = @(
   "test_challan_adapter.py",
   "test_erp_purchase_service.py",
   "test_integration_api.py",
-  "test_purchase_db.py"
+  "test_purchase_db.py",
+  "test_pdf_purchase_adapter.py"
 )
 
 $directories = @(
