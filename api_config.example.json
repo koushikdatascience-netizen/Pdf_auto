@@ -15,6 +15,18 @@
   "transaction_type": "Purchase_Add",
   "usercode": "A00001",
   "sync": "N",
+  "erp_profile": "generic",
+  "erp_options": {
+    "ptype": "PURCHASE",
+    "purchaseacccode": "P00002",
+    "shopcode": "S00001",
+    "checked_by": "A00001",
+    "bill_type": "AI",
+    "purchase_tax_account": "E00001",
+    "rounding_account": "IEX001",
+    "supplier_name_override": "FL WAREHOUSE JABALPUR",
+    "tppassno_default": ""
+  },
   "mappings": {
     "supplier_aliases": {},
     "item_mappings": {}

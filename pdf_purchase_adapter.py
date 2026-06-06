@@ -122,12 +122,15 @@ def normalize_extracted_purchases(extracted: Mapping[str, Any]) -> List[Dict[str
                     "quantity": str(quantity),
                     "rate": str(rate),
                     "amount": str(amount),
+                    "duty": str(_money(item.get("duty", 0), f"items[{serial}].duty")),
+                    "vat": str(_money(item.get("vat", 0), f"items[{serial}].vat")),
                 }
             )
             calculated_items_total += amount
             covered_serials.append(serial)
 
         source_items_total = _money(group.get("total_mfg_amount"), "group.total_mfg_amount")
+        source_duty_total = _money(group.get("total_duty", 0), "group.total_duty")
         if calculated_items_total.quantize(MONEY) != source_items_total:
             raise PdfPurchaseAdapterError(
                 f"Manufacturer group {group_index} product total does not match its extracted total."
@@ -146,6 +149,24 @@ def normalize_extracted_purchases(extracted: Mapping[str, Any]) -> List[Dict[str
             "items": normalized_items,
             "tax": {"code": "VAT", "rate": str(tax_rate), "amount": str(tax_amount)},
             "total": str((source_items_total + tax_amount).quantize(MONEY)),
+            "erp_source": {
+                "demand_id": demand_id,
+                "docno": demand_id.rsplit("/", 1)[-1],
+                "dc_number": extracted.get("payment", {}).get("dc_number"),
+                "online_payment_reference_number": extracted.get("payment", {}).get(
+                    "online_payment_reference_number"
+                ),
+                "income_tax": str(
+                    (
+                        _money(extracted.get("payment", {}).get("income_tax", 0), "payment.income_tax")
+                        * source_items_total
+                        / _money(extracted.get("payment", {}).get("manufacturing_amount", source_items_total), "payment.manufacturing_amount")
+                    ).quantize(MONEY)
+                    if source_items_total
+                    else Decimal("0.00")
+                ),
+                "duty": str(source_duty_total),
+            },
         }
         validate_invoice_json(invoice, strict_total=True)
         normalized.append(invoice)

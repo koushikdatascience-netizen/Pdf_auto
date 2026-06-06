@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -46,6 +46,8 @@ class Settings:
     sync: str
     mapping_config: MappingConfig
     enable_docs: bool
+    erp_profile: str = "generic"
+    erp_options: Mapping[str, Any] = field(default_factory=dict)
 
 
 def _load_json(path: Path) -> Mapping[str, Any]:
@@ -124,6 +126,8 @@ def load_settings() -> Settings:
             item_mappings=dict(mappings.get("item_mappings", {})),
         ),
         enable_docs=bool(config.get("enable_docs", False)),
+        erp_profile=str(config.get("erp_profile", "generic")).strip().lower(),
+        erp_options=dict(config.get("erp_options", {})),
     )
 
 
@@ -146,3 +150,25 @@ def validate_runtime_settings(settings: Settings) -> None:
         raise RuntimeError("usercode exceeds the ERP maximum length of 6.")
     if len(settings.sync) != 1:
         raise RuntimeError("sync must be exactly one character.")
+    if settings.erp_profile not in {"generic", "mandai"}:
+        raise RuntimeError("erp_profile must be 'generic' or 'mandai'.")
+    if settings.erp_profile == "mandai":
+        required_options = (
+            "ptype",
+            "purchaseacccode",
+            "shopcode",
+            "checked_by",
+            "bill_type",
+            "purchase_tax_account",
+            "rounding_account",
+            "supplier_name_override",
+        )
+        missing = [
+            name for name in required_options
+            if not str(settings.erp_options.get(name, "")).strip()
+        ]
+        if missing:
+            raise RuntimeError(
+                "Mandai profile is missing required erp_options: "
+                + ", ".join(missing)
+            )

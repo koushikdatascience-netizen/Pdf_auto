@@ -6,6 +6,8 @@ param(
   [string]$TransactionType = "Purchase_Add",
   [string]$UserCode = "A00001",
   [string]$Sync = "N",
+  [ValidateSet("generic", "mandai")]
+  [string]$ErpProfile = "generic",
   [switch]$Force
 )
 
@@ -34,6 +36,8 @@ function New-Secret {
   return [Convert]::ToBase64String($bytes)
 }
 
+$dataDir = if ($ErpProfile -eq "mandai") { "agent_data_mandai" } else { "agent_data" }
+
 $config = @{
   host = "127.0.0.1"
   port = $Port
@@ -42,7 +46,7 @@ $config = @{
   approval_secret = New-Secret
   max_pdf_bytes = 15728640
   approval_ttl_seconds = 900
-  data_dir = "agent_data"
+  data_dir = $dataDir
   connection_string = "DRIVER={$Driver};SERVER=$Server;DATABASE=$Database;Trusted_Connection=yes"
   supplier_lookup_sql = "SELECT ledgerCode FROM dbo.MasterAccountsLedger WHERE ledgerName=? AND companyCode=?"
   item_lookup_sql = "SELECT itemcode FROM dbo.itemmst WHERE itemname=? AND (? IS NULL OR ml=?) AND (? IS NULL OR packing=?) AND (? IS NULL OR strengthname=?)"
@@ -51,6 +55,18 @@ $config = @{
   transaction_type = $TransactionType
   usercode = $UserCode
   sync = $Sync
+  erp_profile = $ErpProfile
+  erp_options = @{
+    ptype = "PURCHASE"
+    purchaseacccode = "P00002"
+    shopcode = "S00001"
+    checked_by = $UserCode
+    bill_type = "AI"
+    purchase_tax_account = "E00001"
+    rounding_account = "IEX001"
+    supplier_name_override = "FL WAREHOUSE JABALPUR"
+    tppassno_default = ""
+  }
   mappings = @{
     supplier_aliases = @{}
     item_mappings = @{}

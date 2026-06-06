@@ -21,7 +21,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "Checking live ERP schema (read-only)..." -ForegroundColor Cyan
-& $python -B schema_check.py --output schema_report.json
+& $python -B schema_check.py --profile $config.erp_profile --output schema_report.json
 if ($LASTEXITCODE -ne 0) {
   throw "Live ERP schema check could not complete."
 }

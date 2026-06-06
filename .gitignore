@@ -3,6 +3,7 @@ api_config.json
 
 # Runtime data and customer documents
 agent_data/
+agent_data_mandai/
 uploads/
 app_output/
 json_output/

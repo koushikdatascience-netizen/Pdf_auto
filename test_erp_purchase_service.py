@@ -29,6 +29,32 @@ INVOICE = {
     "total": 19700,
 }
 
+MANDAI_INVOICE = {
+    "supplier": "MOUNT EVEREST",
+    "invoice_no": "tFLDR/2026-2027/00042050-01",
+    "date": "2026-04-22",
+    "items": [
+        {
+            "item_name": "STOK STRONG BEER",
+            "item_code": "S00120",
+            "batch": "BR/2022-2023/2916",
+            "ml": 500,
+            "quantity": 100,
+            "rate": 1112,
+            "amount": 111200,
+            "duty": 144560,
+            "vat": 39600,
+        }
+    ],
+    "tax": {"code": "VAT", "rate": 35.61, "amount": 39600},
+    "total": 150800,
+    "erp_source": {
+        "docno": "00042050",
+        "income_tax": "3016.00",
+        "duty": "144560.00",
+    },
+}
+
 
 class FakeCursor:
     def __init__(self, fail_details=False, missing_item_code=None):
@@ -42,8 +68,14 @@ class FakeCursor:
     def execute(self, sql, *params):
         self.executed.append((sql, params))
         normalized = " ".join(sql.upper().split())
-        if "MASTERACCOUNTSLEDGER" in normalized:
+        if "SELECT COUNT(1) FROM DBO.MASTERACCOUNTSLEDGER" in normalized:
+            self.result = [(1,)]
+        elif "SELECT COUNT(1) FROM DBO.STORAGE" in normalized:
+            self.result = [(1,)]
+        elif "MASTERACCOUNTSLEDGER" in normalized:
             self.result = [("SUP001",)]
+        elif "SELECT PACKING, MRP, T3_AMT, T4_AMT" in normalized:
+            self.result = [(24, 180, 88.96, 0)]
         elif "FROM DBO.ITEMMST" in normalized and "WHERE ITEMNAME" in normalized:
             self.result = [("ITEM002",)]
         elif "FROM DBO.ITEMMST" in normalized and "WHERE ITEMCODE" in normalized:
@@ -191,6 +223,44 @@ class PurchaseServiceTests(unittest.TestCase):
             )
         self.assertFalse(connection.committed)
         self.assertTrue(connection.rolled_back)
+
+    def test_mandai_profile_matches_manual_purchase_calculation(self):
+        connection = FakeConnection()
+        output = insert_purchase(
+            MANDAI_INVOICE,
+            connection,
+            companycode="2",
+            yearcode="8",
+            erp_profile="mandai",
+            erp_options={
+                "ptype": "PURCHASE",
+                "purchaseacccode": "P00002",
+                "shopcode": "S00001",
+                "checked_by": "A00001",
+                "bill_type": "AI",
+                "purchase_tax_account": "E00001",
+                "rounding_account": "IEX001",
+            },
+        )
+        self.assertTrue(connection.committed)
+        self.assertEqual(output["tax_rows_inserted"], 2)
+        detail = next(
+            rows[0] for sql, rows in connection.cursor_value.executed
+            if sql == db.INSERT_MANDAI_PURCHASEDETAIL
+        )
+        self.assertEqual(detail[7], 100)       # itembox
+        self.assertEqual(detail[9], 2400)      # itemquantity
+        self.assertEqual(str(detail[6]), "46.33")    # itemrate
+        self.assertEqual(str(detail[12]), "1112.00") # itemboxrate
+        self.assertEqual(str(detail[21]), "39600.00")
+        self.assertEqual(str(detail[22]), "3016.00")
+        self.assertEqual(str(detail[23]), "8896.00")
+        main = next(
+            params for sql, params in connection.cursor_value.executed
+            if sql == db.INSERT_MANDAI_PURCHASEMAIN
+        )
+        self.assertEqual(str(main[13]), "162712.00")
+        self.assertEqual(main[9], "00042050")
 
     def test_supplied_item_code_must_exist_in_item_master(self):
         connection = FakeConnection(missing_item_code="100001")

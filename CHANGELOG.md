@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.6.0 - 2026-06-06
+
+- Add a strict Mandai ERP purchase profile derived from real manual purchases.
+- Convert cases to bottle quantities using verified `itemmst.packing`.
+- Use the configured warehouse supplier and `itemmst` per-case T3/T4 amounts,
+  matching manually entered Mandai purchases.
+- Populate Mandai header, detail tax/charge, duty, box-rate, MRP, and account rows.
+- Validate Mandai purchase account and shop before preview or insertion.
+- Keep `tppassno` blank/configurable when it is not present in the source PDF.
+
 ## 1.5.1 - 2026-06-06
 
 - Add a separate read-only audit command for onboarding different ERP databases.

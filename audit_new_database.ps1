@@ -4,7 +4,8 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$Database,
   [string]$Driver = "ODBC Driver 17 for SQL Server",
-  [string]$Output = "new_database_audit.json"
+  [string]$Output = "new_database_audit.json",
+  [switch]$Deep
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,7 +18,11 @@ $previousConnection = $env:SQLSERVER_CONNECTION_STRING
 try {
   $env:SQLSERVER_CONNECTION_STRING = "DRIVER={$Driver};SERVER=$Server;DATABASE=$Database;Trusted_Connection=yes;TrustServerCertificate=yes"
   Write-Host "Running read-only audit against $Server / $Database..." -ForegroundColor Cyan
-  & $python -B (Join-Path $PSScriptRoot "schema_check.py") --output $Output
+  $auditArgs = @("-B", (Join-Path $PSScriptRoot "schema_check.py"), "--output", $Output)
+  if ($Deep) {
+    $auditArgs += "--include-module-scan"
+  }
+  & $python @auditArgs
   if ($LASTEXITCODE -ne 0) {
     throw "Database audit failed."
   }

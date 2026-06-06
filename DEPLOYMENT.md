@@ -46,6 +46,18 @@ Review `new_database_audit.json`. Do not enable insertion until
 `compatible` is true and every `manual_review` item has been confirmed with the
 ERP team. This audit does not modify `api_config.json` and performs no writes.
 
+For a validated Mandai installation, enable the dedicated profile:
+
+```powershell
+.\enable_mandai_profile.ps1
+```
+
+Restart and run PDF preview only. Confirm calculated case/bottle quantities,
+Mandai T1/T2/T3/T4 amounts, duty, final total, account codes, and blank/configured
+`tppassno` before approving the first test insert. The profile uses
+`agent_data_mandai` for mappings and approval state, keeping them separate from
+every previously configured ERP database.
+
 Confirm these ERP-specific values:
 
 ```text

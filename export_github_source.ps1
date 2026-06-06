@@ -38,6 +38,7 @@ $files = @(
   "save_supplier_mapping.ps1",
   "save_item_mapping.ps1",
   "retry_resolution.ps1",
+  "enable_mandai_profile.ps1",
   "run_agent.py",
   "schema_check.py",
   "audit_new_database.ps1",

@@ -168,6 +168,23 @@ Use `api_config.example.json` as the public template. The `mappings` section is
 supported for installation defaults, but normal users and the ERP EXE should
 manage mappings through the API.
 
+### Mandai ERP Profile
+
+Mandai uses case quantities, bottle quantities, item-master per-case tax amounts, duty,
+income tax, purchase accounts, shop codes, and two PurchaseTaxDetail account
+rows. Enable its dedicated profile only after the read-only database audit:
+
+```powershell
+.\enable_mandai_profile.ps1
+```
+
+Restart the agent and run preview-only validation first. The Mandai profile
+refuses preview/insertion when its configured purchase account, shop, packing,
+or item master values are invalid. It stores mappings, approvals, and audit logs
+in `agent_data_mandai` so data from another ERP database cannot be reused.
+`tppassno` remains blank unless supplied by an approved source because it is not
+present in the delivery-challan PDF.
+
 ## Missing Master Data
 
 The service does not create suppliers or items. When a supplier or item is

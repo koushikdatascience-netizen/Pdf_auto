@@ -57,10 +57,48 @@ EXPECTED_INSERT_COLUMNS = {
     ],
 }
 
+MANDAI_INSERT_COLUMNS = {
+    **EXPECTED_INSERT_COLUMNS,
+    "purchasemain": [
+        "companycode", "yearcode", "trnid", "trnno", "trndate", "ptype",
+        "purchaseacccode", "suppliercode", "shopcode", "docno", "docdate",
+        "tppassno", "schemecode", "totamount", "tottaxOth", "totnetamt",
+        "narration", "checkedBy", "saletax_including_free", "billType", "Sync",
+    ],
+    "purchasedetail": [
+        "companycode", "yearcode", "trnno", "slno", "itemcode", "batchno",
+        "itemrate", "itembox", "itemloose", "itemquantity", "itemamount",
+        "itemfreeqnty", "itemboxrate", "itemmrp", "itemdiscount", "trndate",
+        "cgst", "sgst", "cess", "addcess", "totalamount", "T1_Amt", "T2_Amt",
+        "T3_Amt", "T4_Amt", "ETD",
+    ],
+    "PurchaseTaxDetail": [
+        "companycode", "trnno", "schemecode", "TaxCode", "TaxRate", "OnAmount",
+        "TaxAmount", "TaxAccount", "yearcode",
+    ],
+}
+
 REQUIRED_MASTER_COLUMNS = {
     "MasterAccountsLedger": ["companyCode", "ledgerCode", "ledgerName"],
     "itemmst": ["itemcode", "itemname", "ml", "packing", "strengthname"],
 }
+
+MANDAI_MASTER_COLUMNS = {
+    **REQUIRED_MASTER_COLUMNS,
+    "itemmst": [
+        "itemcode", "itemname", "ml", "packing", "strengthname", "MRP",
+        "T3_Amt", "T4_Amt",
+    ],
+    "storage": ["companyCode", "shopcode"],
+}
+
+
+def expected_insert_columns(profile: str) -> Dict[str, List[str]]:
+    return MANDAI_INSERT_COLUMNS if profile.lower() == "mandai" else EXPECTED_INSERT_COLUMNS
+
+
+def required_master_columns(profile: str) -> Dict[str, List[str]]:
+    return MANDAI_MASTER_COLUMNS if profile.lower() == "mandai" else REQUIRED_MASTER_COLUMNS
 
 FORBIDDEN_WRITE_TABLES = {
     "transactionmain",
@@ -254,6 +292,17 @@ def main() -> None:
         type=Path,
         help="Write the JSON report directly using UTF-8 encoding.",
     )
+    parser.add_argument(
+        "--include-module-scan",
+        action="store_true",
+        help="Also scan stored procedure/view definitions. This can be slow on large ERPs.",
+    )
+    parser.add_argument(
+        "--profile",
+        choices=("generic", "mandai"),
+        default=os.environ.get("ERP_PROFILE", "generic").lower(),
+        help="Validate the columns used by the selected ERP insert profile.",
+    )
     args = parser.parse_args()
 
     connection_string = os.environ.get("SQLSERVER_CONNECTION_STRING")
@@ -274,7 +323,8 @@ def main() -> None:
             "blocking_issues": [],
             "manual_review": [],
         }
-        for table, inserted_columns in EXPECTED_INSERT_COLUMNS.items():
+        report["erp_profile"] = args.profile
+        for table, inserted_columns in expected_insert_columns(args.profile).items():
             columns = inspect_table(cursor, table)
             actual_by_lower = {column["name"].lower(): column for column in columns}
             missing_insert_columns = [
@@ -297,7 +347,11 @@ def main() -> None:
                 "indexes": inspect_indexes(cursor, table),
                 "check_constraints": inspect_checks(cursor, table),
                 "triggers": inspect_triggers(cursor, table),
-                "referencing_modules": inspect_referencing_modules(cursor, table),
+                "referencing_modules": (
+                    inspect_referencing_modules(cursor, table)
+                    if args.include_module_scan
+                    else []
+                ),
                 "columns": columns,
             }
             if not columns:
@@ -329,7 +383,7 @@ def main() -> None:
                     + ", ".join(trigger["name"] for trigger in report["tables"][table]["triggers"])
                 )
 
-        for table, required_columns in REQUIRED_MASTER_COLUMNS.items():
+        for table, required_columns in required_master_columns(args.profile).items():
             columns = inspect_table(cursor, table)
             actual = {column["name"].lower() for column in columns}
             missing = [column for column in required_columns if column.lower() not in actual]
@@ -344,6 +398,7 @@ def main() -> None:
                 )
 
         report["compatible"] = not report["blocking_issues"]
+        report["module_scan_included"] = args.include_module_scan
         report_json = json.dumps(report, indent=2, default=str)
         if args.output:
             args.output.write_text(report_json, encoding="utf-8")

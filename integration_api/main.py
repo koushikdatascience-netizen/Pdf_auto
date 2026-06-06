@@ -22,8 +22,8 @@ from pdf_purchase_adapter import PdfPurchaseAdapterError, normalize_extracted_pu
 from purchase_service import inspect_purchase_mappings, insert_purchase, preview_purchase
 from purchase_service import PurchaseServiceError
 from schema_check import (
-    EXPECTED_INSERT_COLUMNS,
     FORBIDDEN_WRITE_TABLES,
+    expected_insert_columns,
     inspect_foreign_keys,
     inspect_table,
 )
@@ -76,7 +76,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="Local ERP Purchase Integration Agent",
-        version="1.5.0",
+        version="1.6.0",
         docs_url="/docs" if settings.enable_docs else None,
         redoc_url=None,
         openapi_url="/openapi.json" if settings.enable_docs else None,
@@ -219,6 +219,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 item_lookup_sql=settings.item_lookup_sql,
                 item_code_verify_sql=settings.item_code_verify_sql,
                 strict_total=strict_total,
+                erp_profile=settings.erp_profile,
+                erp_options=settings.erp_options,
             )
             for issue in issues:
                 issue["suggestions"] = master_suggestions(connection, issue, companycode)
@@ -242,6 +244,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 item_lookup_sql=settings.item_lookup_sql,
                 item_code_verify_sql=settings.item_code_verify_sql,
                 strict_total=strict_total,
+                erp_profile=settings.erp_profile,
+                erp_options=settings.erp_options,
             )
             cursor = connection.cursor()
             try:
@@ -454,7 +458,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         cursor = connection.cursor()
         try:
             report: Dict[str, Any] = {"compatible": True, "blocking_issues": [], "tables": {}}
-            for table, inserted_columns in EXPECTED_INSERT_COLUMNS.items():
+            report["erp_profile"] = settings.erp_profile
+            for table, inserted_columns in expected_insert_columns(settings.erp_profile).items():
                 columns = inspect_table(cursor, table)
                 actual = {column["name"].lower(): column for column in columns}
                 inserted = {column.lower() for column in inserted_columns}
@@ -704,6 +709,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 item_lookup_sql=settings.item_lookup_sql,
                 item_code_verify_sql=settings.item_code_verify_sql,
                 strict_total=request.strict_total,
+                erp_profile=settings.erp_profile,
+                erp_options=settings.erp_options,
             )
         finally:
             connection.close()
@@ -756,6 +763,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 transaction_type=settings.transaction_type,
                 usercode=settings.usercode,
                 sync=settings.sync,
+                erp_profile=settings.erp_profile,
+                erp_options=settings.erp_options,
             )
             store.mark_inserted(preview_id, result)
             logger.info("Inserted preview id=%s trnid=%s trnno=%s.", preview_id, result["trnid"], result["trnno"])

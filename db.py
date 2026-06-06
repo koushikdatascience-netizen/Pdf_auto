@@ -45,6 +45,31 @@ INSERT INTO dbo.PurchaseTaxDetail
 VALUES (?, ?, ?, ?, ?, ?)
 """.strip()
 
+INSERT_MANDAI_PURCHASEMAIN = """
+INSERT INTO dbo.purchasemain
+    (companycode, yearcode, trnid, trnno, trndate, ptype, purchaseacccode,
+     suppliercode, shopcode, docno, docdate, tppassno, schemecode, totamount,
+     tottaxOth, totnetamt, narration, checkedBy, saletax_including_free,
+     billType, Sync)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+""".strip()
+
+INSERT_MANDAI_PURCHASEDETAIL = """
+INSERT INTO dbo.purchasedetail
+    (companycode, yearcode, trnno, slno, itemcode, batchno, itemrate,
+     itembox, itemloose, itemquantity, itemamount, itemfreeqnty, itemboxrate,
+     itemmrp, itemdiscount, trndate, cgst, sgst, cess, addcess, totalamount,
+     T1_Amt, T2_Amt, T3_Amt, T4_Amt, ETD)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+""".strip()
+
+INSERT_MANDAI_PURCHASETAXDETAIL = """
+INSERT INTO dbo.PurchaseTaxDetail
+    (companycode, trnno, schemecode, TaxCode, TaxRate, OnAmount,
+     TaxAmount, TaxAccount, yearcode)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+""".strip()
+
 
 class DatabaseError(RuntimeError):
     """Raised for database-level integration failures."""
@@ -264,3 +289,66 @@ def insert_purchase_tax(cursor: Any, values: Optional[Sequence[Any]]) -> int:
     LOGGER.info("Inserting PurchaseTaxDetail row.")
     cursor.execute(INSERT_PURCHASETAXDETAIL, *values)
     return 1
+
+
+def get_mandai_item_master(cursor: Any, itemcode: str) -> dict:
+    cursor.execute(
+        """
+        SELECT packing, MRP, T3_Amt, T4_Amt
+        FROM dbo.itemmst
+        WHERE itemcode = ?
+        """,
+        itemcode,
+    )
+    row = cursor.fetchone()
+    if row is None:
+        raise DatabaseError(f"Mandai item master '{itemcode}' was not found.")
+    if row[0] is None or float(row[0]) <= 0:
+        raise DatabaseError(f"Mandai item '{itemcode}' has invalid packing.")
+    return {
+        "packing": int(float(row[0])),
+        "mrp": float(row[1] or 0),
+        "t3_amount_per_case": float(row[2] or 0),
+        "t4_amount_per_case": float(row[3] or 0),
+    }
+
+
+def validate_mandai_context(cursor: Any, companycode: str, options: dict) -> None:
+    checks = [
+        (
+            "purchaseacccode",
+            "SELECT COUNT(1) FROM dbo.MasterAccountsLedger WHERE companyCode=? AND ledgerCode=?",
+        ),
+        (
+            "purchase_tax_account",
+            "SELECT COUNT(1) FROM dbo.MasterAccountsLedger WHERE companyCode=? AND ledgerCode=?",
+        ),
+        (
+            "rounding_account",
+            "SELECT COUNT(1) FROM dbo.MasterAccountsLedger WHERE companyCode=? AND ledgerCode=?",
+        ),
+        (
+            "shopcode",
+            "SELECT COUNT(1) FROM dbo.storage WHERE companyCode=? AND shopcode=?",
+        ),
+    ]
+    for name, sql in checks:
+        value = str(options.get(name) or "").strip()
+        if not value:
+            raise DatabaseError(f"Mandai option '{name}' is required.")
+        cursor.execute(sql, companycode, value)
+        if int(cursor.fetchone()[0]) != 1:
+            raise DatabaseError(f"Mandai option '{name}' value '{value}' is invalid.")
+
+
+def insert_mandai_purchase_main(cursor: Any, values: Sequence[Any]) -> None:
+    cursor.execute(INSERT_MANDAI_PURCHASEMAIN, *values)
+
+
+def insert_mandai_purchase_details(cursor: Any, rows: Sequence[Sequence[Any]]) -> None:
+    cursor.executemany(INSERT_MANDAI_PURCHASEDETAIL, rows)
+
+
+def insert_mandai_purchase_tax(cursor: Any, rows: Sequence[Sequence[Any]]) -> int:
+    cursor.executemany(INSERT_MANDAI_PURCHASETAXDETAIL, rows)
+    return len(rows)
