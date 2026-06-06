@@ -52,7 +52,7 @@ if (-not $Insert) {
 }
 
 $confirmation = Read-Host "Type INSERT to write all displayed purchases to SQL Server"
-if ($confirmation -cne "INSERT") {
+if ($confirmation.Trim() -ine "INSERT") {
   Write-Host "Insert cancelled. No database rows were inserted."
   exit 0
 }
