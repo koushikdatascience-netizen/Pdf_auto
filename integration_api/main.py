@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 import hashlib
 import logging
+import re
 import time
 import uuid
 from contextlib import asynccontextmanager
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Dict
 
@@ -46,6 +48,104 @@ from .security import (
 from .state_store import StateStore
 
 
+ITEM_SEARCH_ALIASES = {
+    "KINGFISHER": ("KFS",),
+}
+ITEM_NAME_NOISE_WORDS = {"ML", "BEER", "LIQUOR", "PRODUCT"}
+
+
+def _item_suggestion_terms(source: str) -> list[str]:
+    words = re.findall(r"[A-Z0-9]+", source.upper())
+    terms: list[str] = []
+    for word in words:
+        if len(word) >= 3 and word not in terms:
+            terms.append(word)
+        for alias in ITEM_SEARCH_ALIASES.get(word, ()):
+            if alias not in terms:
+                terms.append(alias)
+    return terms[:6]
+
+
+def _normalized_item_words(value: str) -> set[str]:
+    words = set(re.findall(r"[A-Z0-9]+", value.upper()))
+    expanded = set(words)
+    for word in words:
+        expanded.update(ITEM_SEARCH_ALIASES.get(word, ()))
+    return expanded - ITEM_NAME_NOISE_WORDS
+
+
+def _rank_item_suggestions(
+    rows: list[Any],
+    source: str,
+    expected_ml: Any,
+    expected_packing: Any = None,
+    expected_strength: Any = None,
+) -> list[Dict[str, Any]]:
+    source_words = _normalized_item_words(source)
+    expanded_source = source_words
+    expected = float(expected_ml) if expected_ml is not None else None
+    packing = float(expected_packing) if expected_packing is not None else None
+    strength = str(expected_strength or "").strip().upper()
+
+    def score_details(row: Any) -> tuple[float, list[str], bool]:
+        item_words = _normalized_item_words(str(row[1]))
+        item_ml = float(row[2]) if row[2] is not None else None
+        item_packing = float(row[3]) if row[3] is not None else None
+        item_strength = str(row[4] or "").strip().upper()
+        intersection = expanded_source & item_words
+        union = expanded_source | item_words
+        token_score = (len(intersection) / len(union) * 45) if union else 0
+        source_text = " ".join(sorted(expanded_source))
+        item_text = " ".join(sorted(item_words))
+        sequence_score = SequenceMatcher(None, source_text, item_text).ratio() * 20
+        total = token_score + sequence_score
+        reasons = []
+        exact_ml = expected is None or item_ml == expected
+        if expected is not None:
+            if exact_ml:
+                total += 30
+                reasons.append(f"exact ML match ({item_ml:g})")
+            else:
+                total -= 50
+                reasons.append(f"ML mismatch: PDF {expected:g}, ERP {item_ml:g}")
+        if intersection:
+            reasons.append("matching name terms: " + ", ".join(sorted(intersection)))
+        if packing is not None and item_packing == packing:
+            total += 5
+            reasons.append(f"exact packing match ({item_packing:g})")
+        if strength and item_strength == strength:
+            total += 5
+            reasons.append(f"exact strength match ({item_strength})")
+        return max(0, min(100, total)), reasons, exact_ml
+
+    def sort_key(row: Any) -> tuple[float, str]:
+        return score_details(row)[0], str(row[1])
+
+    related = [
+        row for row in rows
+        if expanded_source & _normalized_item_words(str(row[1]))
+    ]
+    ranked = sorted(related or rows, key=sort_key, reverse=True)
+    meaningful = [row for row in ranked if score_details(row)[0] > 0]
+    ranked = (meaningful or ranked)[:10]
+    suggestions = []
+    for row in ranked:
+        score, reasons, exact_ml = score_details(row)
+        confidence = "high" if score >= 75 and exact_ml else "medium" if score >= 50 else "low"
+        suggestions.append({
+            "itemcode": str(row[0]).strip(),
+            "item_name": str(row[1]).strip(),
+            "ml": row[2],
+            "packing": row[3],
+            "strength_name": row[4],
+            "match_score": round(score, 1),
+            "confidence": confidence,
+            "match_reasons": reasons,
+            "requires_user_confirmation": True,
+        })
+    return suggestions
+
+
 def _configure_logging(settings: Settings) -> logging.Handler:
     settings.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
     handler = logging.FileHandler(settings.audit_log_path, encoding="utf-8")
@@ -76,7 +176,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="Local ERP Purchase Integration Agent",
-        version="1.6.0",
+        version="1.7.0",
         docs_url="/docs" if settings.enable_docs else None,
         redoc_url=None,
         openapi_url="/openapi.json" if settings.enable_docs else None,
@@ -126,26 +226,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     {"suppliercode": str(row[0]).strip(), "supplier_name": str(row[1]).strip()}
                     for row in cursor.fetchall()
                 ]
+            terms = _item_suggestion_terms(str(issue["source"]))
+            conditions = " OR ".join("itemname LIKE ?" for _ in terms)
+            ml_condition = " OR ml = ?" if issue.get("ml") is not None else ""
+            expected_ml = issue.get("ml")
+            if expected_ml is not None:
+                numeric_ml = float(expected_ml)
+                expected_ml = int(numeric_ml) if numeric_ml.is_integer() else numeric_ml
             cursor.execute(
-                """
-                SELECT TOP 10 itemcode, itemname, ml, packing, strengthname
+                f"""
+                SELECT TOP 100 itemcode, itemname, ml, packing, strengthname
                 FROM dbo.itemmst
-                WHERE itemname LIKE ? OR itemcode LIKE ?
-                ORDER BY itemname
+                WHERE ({conditions}){ml_condition}
                 """,
-                f"%{search}%",
-                f"%{search}%",
+                *[f"%{term}%" for term in terms],
+                *([expected_ml] if expected_ml is not None else []),
             )
-            return [
-                {
-                    "itemcode": str(row[0]).strip(),
-                    "item_name": str(row[1]).strip(),
-                    "ml": row[2],
-                    "packing": row[3],
-                    "strength_name": row[4],
-                }
-                for row in cursor.fetchall()
-            ]
+            return _rank_item_suggestions(
+                cursor.fetchall(),
+                str(issue["source"]),
+                issue.get("ml"),
+                issue.get("packing"),
+                issue.get("strength_name"),
+            )
         finally:
             cursor.close()
 

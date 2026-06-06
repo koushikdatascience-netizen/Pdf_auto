@@ -58,6 +58,15 @@ Mandai T1/T2/T3/T4 amounts, duty, final total, account codes, and blank/configur
 `agent_data_mandai` for mappings and approval state, keeping them separate from
 every previously configured ERP database.
 
+Before first production approval, manually enter one representative purchase in
+the ERP EXE and compare it with the automated PDF preview:
+
+```powershell
+.\compare_pdf_to_manual_purchase.ps1 -PdfFile ".\invoice.pdf" -ManualTrnno 14
+```
+
+Review every reported difference. This comparison is read-only.
+
 Confirm these ERP-specific values:
 
 ```text

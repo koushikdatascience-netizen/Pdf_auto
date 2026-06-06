@@ -6,7 +6,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from integration_api.config import Settings
-from integration_api.main import create_app
+from integration_api.main import _item_suggestion_terms, _rank_item_suggestions, create_app
 from mapping_service import MappingConfig
 
 
@@ -67,7 +67,11 @@ class FakeCursor:
         normalized = " ".join(sql.upper().split())
         if "SELECT TOP 25 LEDGERCODE" in normalized:
             self.result = [("B00011", "BEVCO (FL)")]
-        elif "SELECT TOP 25 ITEMCODE" in normalized or "SELECT TOP 10 ITEMCODE" in normalized:
+        elif (
+            "SELECT TOP 25 ITEMCODE" in normalized
+            or "SELECT TOP 10 ITEMCODE" in normalized
+            or "SELECT TOP 100 ITEMCODE" in normalized
+        ):
             self.result = [("B00025", "BAGPIPER 375 ML", 375, "24", "25 UP")]
         elif "MASTERACCOUNTSLEDGER" in normalized:
             self.result = [("B00011",)]
@@ -175,6 +179,22 @@ class IntegrationApiTests(unittest.TestCase):
     def test_authentication_required(self):
         response = self.client.get("/api/v1/health")
         self.assertEqual(response.status_code, 401)
+
+    def test_item_suggestions_expand_abbreviation_and_prioritize_exact_ml(self):
+        self.assertIn("KFS", _item_suggestion_terms("KINGFISHER STRONG PREMIUM BEER"))
+        ranked = _rank_item_suggestions(
+            [
+                ("100241", "KINGFISHER LAGAR 500ML", 500, 24, "BEER"),
+                ("K00002", "KFS STRONG 500 ML", 500, 24, "BEER"),
+                ("K00001", "KFS STRONG 650 ML", 650, 12, "BEER"),
+            ],
+            "KINGFISHER STRONG PREMIUM BEER",
+            "650.00",
+        )
+        self.assertEqual(ranked[0]["itemcode"], "K00001")
+        self.assertEqual(ranked[0]["confidence"], "medium")
+        self.assertTrue(ranked[0]["requires_user_confirmation"])
+        self.assertIn("exact ML match (650)", ranked[0]["match_reasons"])
 
     def test_supplier_mapping_is_verified_saved_and_available_without_restart(self):
         saved = self.client.post(

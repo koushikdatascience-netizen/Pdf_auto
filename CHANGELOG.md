@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.7.0 - 2026-06-06
+
+- Keep item-master creation exclusively inside the ERP EXE.
+- Rank ERP item suggestions using normalized names, known abbreviations, ML,
+  packing, and strength.
+- Return match score, confidence, reasons, and mandatory user confirmation.
+- Add read-only PDF-preview versus manual-purchase comparison tooling.
+- Add read-only item-creation procedure, trigger, and dependency auditing.
+
 ## 1.6.0 - 2026-06-06
 
 - Add a strict Mandai ERP purchase profile derived from real manual purchases.

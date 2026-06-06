@@ -8,6 +8,8 @@ uploads/
 app_output/
 json_output/
 schema_report.json
+item_creation_audit.json
+purchase_comparison.json
 extracted-result.json
 erp_mapping.*.json
 !erp_mapping.example.json

@@ -191,6 +191,10 @@ The service does not create suppliers or items. When a supplier or item is
 missing, preview returns HTTP `409`. The EXE can let the user select an existing
 ERP master and save a persistent mapping, then retry the invoice.
 
+Item suggestions use deterministic name normalization, known abbreviations, ML,
+packing, and strength. Each suggestion includes a match score, confidence, and
+reasons. The operator must always confirm the mapping.
+
 Mappings are verified against ERP masters, work immediately, and persist in
 `agent_data/mappings.json`. No manual `api_config.json` edit or restart is
 required.
@@ -203,6 +207,15 @@ required.
 
 Item mappings use normalized product name plus ML, so a new batch does not
 require mapping the same product again. Legacy batch mappings remain supported.
+
+Compare a PDF-generated preview with a manually entered ERP purchase without
+writing any data:
+
+```powershell
+.\compare_pdf_to_manual_purchase.ps1 -PdfFile ".\22-04.pdf" -ManualTrnno 14
+```
+
+The field-by-field result is written to `purchase_comparison.json`.
 
 PDF preview rejects duplicates before approval using supplier + document number.
 After an agent-managed insert, uploading the exact same PDF is also detected by
