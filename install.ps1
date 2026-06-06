@@ -28,7 +28,13 @@ if (-not (Test-Path -LiteralPath $venvPython)) {
 
 Write-Host "Installing dependencies..." -ForegroundColor Cyan
 & $venvPython -m pip install --upgrade pip
+if ($LASTEXITCODE -ne 0) {
+  throw "Unable to upgrade pip."
+}
 & $venvPython -m pip install -r (Join-Path $root "requirements-api.txt")
+if ($LASTEXITCODE -ne 0) {
+  throw "Unable to install Python dependencies."
+}
 
 Write-Host "Creating private agent configuration..." -ForegroundColor Cyan
 $setupArgs = @{

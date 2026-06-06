@@ -6,6 +6,8 @@
 - Added structured PDF extraction to normalized invoice adapter.
 - Added ERP supplier/item-master validation directly after PDF upload.
 - Added multi-manufacturer PDF support and `test_pdf_flow.ps1`.
+- Added the required `httpx` integration-test dependency.
+- Made installation verification stop immediately when tests or schema checks fail.
 
 ## 1.1.0 - 2026-06-05
 
