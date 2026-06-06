@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, Field
 
@@ -26,5 +26,6 @@ class SupplierMappingRequest(BaseModel):
 
 class ItemMappingRequest(BaseModel):
     source_name: str = Field(min_length=1)
-    batch: str = Field(min_length=1)
+    ml: Optional[float] = Field(default=None, gt=0)
+    batch: Optional[str] = None
     item_code: str = Field(min_length=1)

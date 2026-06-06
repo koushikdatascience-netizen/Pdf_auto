@@ -128,7 +128,7 @@ public sealed class ErpPurchaseAgentClient
 
     public async Task<JsonDocument> SaveItemMappingAsync(
         string extractedName,
-        string batch,
+        double ml,
         string selectedItemCode)
     {
         using var response = await _http.PostAsJsonAsync(
@@ -136,9 +136,17 @@ public sealed class ErpPurchaseAgentClient
             new
             {
                 source_name = extractedName,
-                batch,
+                ml,
                 item_code = selectedItemCode
             });
+        return await ReadResponseAsync(response);
+    }
+
+    public async Task<JsonDocument> RetryResolutionAsync(string resolutionId)
+    {
+        using var response = await _http.PostAsync(
+            $"/api/v1/resolutions/{Uri.EscapeDataString(resolutionId)}/retry",
+            content: null);
         return await ReadResponseAsync(response);
     }
 

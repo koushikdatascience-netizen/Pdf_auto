@@ -1,8 +1,8 @@
 param(
   [Parameter(Mandatory = $true)]
   [string]$SourceName,
-  [Parameter(Mandatory = $true)]
-  [string]$Batch,
+  [string]$Batch = "",
+  [Nullable[double]]$Ml,
   [Parameter(Mandatory = $true)]
   [string]$ItemCode,
   [string]$BaseUrl = "http://127.0.0.1:47831"
@@ -15,7 +15,11 @@ $body = @{
   source_name = $SourceName
   batch = $Batch
   item_code = $ItemCode
-} | ConvertTo-Json
+}
+if ($null -ne $Ml) {
+  $body.ml = $Ml
+}
+$body = $body | ConvertTo-Json
 
 Invoke-RestMethod `
   -Method POST `

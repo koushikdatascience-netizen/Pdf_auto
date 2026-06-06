@@ -26,6 +26,11 @@ class StateStore:
             raise ValueError("Invalid preview id.")
         return self.path / f"{preview_id}.json"
 
+    def _resolution_path(self, resolution_id: str) -> Path:
+        if not resolution_id.isalnum():
+            raise ValueError("Invalid resolution id.")
+        return self.path / f"resolution-{resolution_id}.json"
+
     def _write(self, record: Dict[str, Any]) -> None:
         target = self._record_path(record["preview_id"])
         temporary = target.with_suffix(".tmp")
@@ -103,3 +108,51 @@ class StateStore:
             state["status"] = "approved"
             state["error"] = error[:2000]
             self._write(state)
+
+    def create_resolution(
+        self,
+        resolution_id: str,
+        expires_at: int,
+        payload: Dict[str, Any],
+    ) -> None:
+        with self._lock:
+            path = self._resolution_path(resolution_id)
+            temporary = path.with_suffix(".tmp")
+            content = json.dumps(
+                {
+                    "resolution_id": resolution_id,
+                    "created_at": int(time.time()),
+                    "expires_at": expires_at,
+                    "payload_json": payload,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            temporary.write_text(content, encoding="utf-8")
+            temporary.replace(path)
+
+    def get_resolution(self, resolution_id: str) -> Optional[Dict[str, Any]]:
+        path = self._resolution_path(resolution_id)
+        if not path.exists():
+            return None
+        state = json.loads(path.read_text(encoding="utf-8"))
+        if int(state["expires_at"]) < int(time.time()):
+            path.unlink(missing_ok=True)
+            return None
+        return state
+
+    def find_inserted_by_file_hash(self, file_hash: str) -> Optional[Dict[str, Any]]:
+        """Find a previously inserted preview created from the exact same PDF bytes."""
+        for path in self.path.glob("*.json"):
+            if path.name.startswith("resolution-"):
+                continue
+            try:
+                state = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if (
+                state.get("status") == "inserted"
+                and state.get("payload_json", {}).get("file_hash") == file_hash
+            ):
+                return state
+        return None

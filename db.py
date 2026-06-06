@@ -219,6 +219,35 @@ def ensure_invoice_not_duplicate(
         )
 
 
+def find_existing_purchase(
+    cursor: Any,
+    companycode: str,
+    yearcode: str,
+    suppliercode: str,
+    docno: str,
+) -> Optional[dict]:
+    """Find an existing ERP purchase during preview without taking write locks."""
+    cursor.execute(
+        """
+        SELECT TOP 1 trnid, trnno, trndate
+        FROM dbo.purchasemain
+        WHERE companycode = ?
+          AND yearcode = ?
+          AND suppliercode = ?
+          AND docno = ?
+        ORDER BY trnid DESC
+        """,
+        companycode,
+        yearcode,
+        suppliercode,
+        docno,
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    return {"trnid": int(row[0]), "trnno": int(row[1]), "trndate": row[2]}
+
+
 def insert_purchase_main(cursor: Any, values: Sequence[Any]) -> None:
     LOGGER.info("Inserting purchasemain row.")
     cursor.execute(INSERT_PURCHASEMAIN, *values)

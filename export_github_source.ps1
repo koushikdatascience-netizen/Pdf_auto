@@ -37,6 +37,7 @@ $files = @(
   "test_pdf_flow.ps1",
   "save_supplier_mapping.ps1",
   "save_item_mapping.ps1",
+  "retry_resolution.ps1",
   "run_agent.py",
   "schema_check.py",
   "db.py",

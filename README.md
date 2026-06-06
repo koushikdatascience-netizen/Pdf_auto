@@ -135,7 +135,8 @@ The script requires typing `INSERT` before writing to SQL Server.
 If master data is missing, PDF preview returns every unresolved supplier and
 item together with ERP search suggestions. The EXE should show a Resolve Issues
 screen where the operator can search, map, check live stock, or open the ERP
-item-master screen and then retry preview.
+item-master screen and then retry the saved resolution session without
+uploading the PDF again.
 
 Live stock is available through
 `GET /api/v1/masters/items/{itemcode}/stock?companycode=...&yearcode=...` after
@@ -179,8 +180,16 @@ required.
 
 ```powershell
 .\save_supplier_mapping.ps1 -SourceName "PDF SUPPLIER" -TargetName "ERP SUPPLIER"
-.\save_item_mapping.ps1 -SourceName "PDF ITEM" -Batch "PDF-BATCH" -ItemCode "ERP_CODE"
+.\save_item_mapping.ps1 -SourceName "PDF ITEM" -Ml 650 -ItemCode "ERP_CODE"
+.\retry_resolution.ps1 -ResolutionId "ID_FROM_409_RESPONSE"
 ```
+
+Item mappings use normalized product name plus ML, so a new batch does not
+require mapping the same product again. Legacy batch mappings remain supported.
+
+PDF preview rejects duplicates before approval using supplier + document number.
+After an agent-managed insert, uploading the exact same PDF is also detected by
+its SHA-256 file hash.
 
 ## Build A Standalone EXE
 

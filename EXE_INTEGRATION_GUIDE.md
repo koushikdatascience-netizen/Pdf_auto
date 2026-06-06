@@ -142,12 +142,13 @@ record together in HTTP `409`:
 {
   "ready_for_insert": false,
   "resolution_required": true,
+  "resolution_id": "...",
   "unresolved_count": 1,
   "action": "Resolve each master-data issue, save its mapping, then retry preview.",
   "unresolved": [{
     "type": "item",
     "source": "PDF ITEM NAME",
-    "mapping_key": "PDF ITEM NAME|PDF-BATCH",
+    "mapping_key": "PDF ITEM NAME|ML:650.00",
     "suggestions": [],
     "actions": {
       "search_master": true,
@@ -162,8 +163,9 @@ record together in HTTP `409`:
 
 The EXE should display a Resolve Issues screen containing all records. The user
 can select an existing master and save a mapping, check configured live stock,
-or open the ERP's existing item-master screen. Preview must be called again
-afterward. Direct instant creation stays disabled until the ERP team supplies
+or open the ERP's existing item-master screen. Then call
+`POST /api/v1/resolutions/{resolution_id}/retry`; the PDF does not need to be
+uploaded again. Direct instant creation stays disabled until the ERP team supplies
 its approved item-creation procedure and required fields.
 
 ### Master Search And Mapping
@@ -193,10 +195,14 @@ POST /api/v1/mappings/items
 
 {
   "source_name": "PDF EXTRACTED ITEM",
-  "batch": "PDF-BATCH",
+  "ml": 650,
   "item_code": "B00025"
 }
 ```
+
+Duplicate PDF previews return HTTP `409` with `duplicate: true` and the existing
+ERP `trnid`/`trnno` when available. The EXE must offer **Open Existing Purchase**
+and must not allow insertion.
 
 Mappings are verified before saving, persist in `agent_data/mappings.json`, and
 work immediately without restarting the agent.

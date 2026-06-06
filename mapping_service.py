@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
@@ -87,7 +88,14 @@ def load_mapping_config(path: Optional[Path]) -> MappingConfig:
 
 
 def item_mapping_key(item: ValidatedItem) -> str:
-    """Stable item mapping key combining item name and batch."""
+    """Stable product mapping key independent of changing invoice batches."""
+    normalized_name = re.sub(r"\s+", " ", item.item_name).strip().upper()
+    ml = str(item.ml) if item.ml is not None else "UNKNOWN"
+    return f"{normalized_name}|ML:{ml}"
+
+
+def legacy_item_mapping_key(item: ValidatedItem) -> str:
+    """Previous batch-specific key retained for backward compatibility."""
     return f"{item.item_name}|{item.batch}"
 
 
@@ -127,7 +135,11 @@ def resolve_item_code(
 ) -> str:
     """Resolve and always verify the final item code exists in ERP item master."""
     candidate_code = item.item_code
-    mapped_code = str(config.item_mappings.get(item_mapping_key(item)) or "").strip()
+    mapped_code = str(
+        config.item_mappings.get(item_mapping_key(item))
+        or config.item_mappings.get(legacy_item_mapping_key(item))
+        or ""
+    ).strip()
     if not candidate_code and mapped_code:
         candidate_code = mapped_code
 

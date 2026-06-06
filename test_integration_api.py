@@ -75,6 +75,8 @@ class FakeCursor:
             self.result = [(params[0],)]
         elif "SELECT COUNT(1)" in normalized:
             self.result = [(0,)]
+        elif "SELECT TOP 1 TRNID, TRNNO, TRNDATE" in normalized:
+            self.result = []
         elif "SP_GETAPPLOCK" in normalized:
             self.result = [(0,)]
         elif "MAX(TRNID)" in normalized:
@@ -91,7 +93,7 @@ class FakeCursor:
         return self.result[:size]
 
     def fetchone(self):
-        return self.result[0]
+        return self.result[0] if self.result else None
 
     def fetchall(self):
         return self.result
@@ -209,6 +211,19 @@ class IntegrationApiTests(unittest.TestCase):
         mappings = self.client.get("/api/v1/mappings", headers=self.headers).json()
         self.assertEqual(mappings["item_mappings"]["PDF ITEM|PDF-BATCH"], "B00025")
 
+    def test_stable_item_mapping_uses_name_and_ml_not_batch(self):
+        saved = self.client.post(
+            "/api/v1/mappings/items",
+            headers=self.headers,
+            json={
+                "source_name": "Stok Strong Beer",
+                "ml": 650,
+                "item_code": "S00112",
+            },
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        self.assertEqual(saved.json()["mapping_key"], "STOK STRONG BEER|ML:650.00")
+
     def test_erp_master_search_endpoints(self):
         suppliers = self.client.get(
             "/api/v1/masters/suppliers",
@@ -321,9 +336,86 @@ class IntegrationApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409, response.text)
         body = response.json()
         self.assertTrue(body["resolution_required"])
+        self.assertTrue(body["resolution_id"])
         self.assertEqual(body["unresolved_count"], 2)
         self.assertTrue(body["unresolved"][0]["actions"]["search_master"])
         self.assertTrue(body["unresolved"][0]["actions"]["check_live_stock"])
+
+    @patch("integration_api.main.db.find_existing_purchase")
+    @patch("integration_api.main.extract_pdf", return_value=EXTRACTED)
+    def test_pdf_preview_reports_existing_erp_purchase(self, _, existing):
+        existing.return_value = {
+            "trnid": 34,
+            "trnno": 3,
+            "trndate": "2026-04-22T00:00:00",
+        }
+        response = self.client.post(
+            "/api/v1/purchases/from-pdf/preview",
+            headers=self.headers,
+            data={"companycode": "2", "yearcode": "8", "strict_total": "true"},
+            files={"pdf": ("invoice.pdf", b"%PDF-1.4 duplicate", "application/pdf")},
+        )
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertTrue(response.json()["duplicate"])
+        self.assertEqual(response.json()["duplicates"][0]["trnid"], 34)
+
+    @patch("integration_api.main.extract_pdf", return_value=EXTRACTED)
+    def test_resolution_session_retries_without_pdf_upload(self, _):
+        issue = {
+            "type": "item",
+            "source": "UNKNOWN BEER",
+            "mapping_key": "UNKNOWN BEER|ML:650.00",
+            "batch": "B-1",
+            "ml": "650.00",
+            "message": "No match.",
+        }
+        with patch(
+            "integration_api.main.inspect_purchase_mappings",
+            side_effect=[[issue], []],
+        ):
+            first = self.client.post(
+                "/api/v1/purchases/from-pdf/preview",
+                headers=self.headers,
+                data={"companycode": "2", "yearcode": "8", "strict_total": "true"},
+                files={"pdf": ("invoice.pdf", b"%PDF-1.4 resolution", "application/pdf")},
+            )
+            self.assertEqual(first.status_code, 409, first.text)
+            resolution_id = first.json()["resolution_id"]
+
+            retried = self.client.post(
+                f"/api/v1/resolutions/{resolution_id}/retry",
+                headers=self.headers,
+            )
+        self.assertEqual(retried.status_code, 200, retried.text)
+        self.assertTrue(retried.json()["ready_for_insert"])
+        self.assertIn("approval_token", retried.json()["purchases"][0])
+
+    @patch("integration_api.main.extract_pdf", return_value=EXTRACTED)
+    def test_exact_inserted_pdf_is_rejected_on_reupload(self, _):
+        pdf_bytes = b"%PDF-1.4 exact duplicate"
+        preview = self.client.post(
+            "/api/v1/purchases/from-pdf/preview",
+            headers=self.headers,
+            data={"companycode": "2", "yearcode": "8", "strict_total": "true"},
+            files={"pdf": ("invoice.pdf", pdf_bytes, "application/pdf")},
+        )
+        self.assertEqual(preview.status_code, 200, preview.text)
+        token = preview.json()["purchases"][0]["approval_token"]
+        inserted = self.client.post(
+            "/api/v1/purchases/insert",
+            headers=self.headers,
+            json={"approval_token": token},
+        )
+        self.assertEqual(inserted.status_code, 200, inserted.text)
+
+        repeated = self.client.post(
+            "/api/v1/purchases/from-pdf/preview",
+            headers=self.headers,
+            data={"companycode": "2", "yearcode": "8", "strict_total": "true"},
+            files={"pdf": ("renamed.pdf", pdf_bytes, "application/pdf")},
+        )
+        self.assertEqual(repeated.status_code, 409, repeated.text)
+        self.assertEqual(repeated.json()["duplicate_type"], "exact_pdf")
 
     @patch(
         "integration_api.main.extract_pdf",

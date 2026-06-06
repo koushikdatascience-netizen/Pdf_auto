@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import time
 import uuid
@@ -75,7 +76,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="Local ERP Purchase Integration Agent",
-        version="1.4.0",
+        version="1.5.0",
         docs_url="/docs" if settings.enable_docs else None,
         redoc_url=None,
         openapi_url="/openapi.json" if settings.enable_docs else None,
@@ -148,7 +149,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             cursor.close()
 
-    async def save_pdf_upload(pdf: UploadFile) -> tuple[str, Path]:
+    async def save_pdf_upload(pdf: UploadFile) -> tuple[str, Path, str]:
         filename = Path(pdf.filename or "upload.pdf").name
         if not filename.lower().endswith(".pdf"):
             raise HTTPException(status_code=415, detail="Only PDF files are supported.")
@@ -160,7 +161,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings.upload_dir.mkdir(parents=True, exist_ok=True)
         path = settings.upload_dir / f"{uuid.uuid4().hex}-{filename}"
         path.write_bytes(content)
-        return filename, path
+        return filename, path, hashlib.sha256(content).hexdigest()
 
     def remove_uploaded_pdf(path: Path) -> None:
         try:
@@ -174,12 +175,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         yearcode: str,
         strict_total: bool,
         preview_data: Dict[str, Any],
+        file_hash: str | None = None,
     ) -> Dict[str, Any]:
         payload = {
             "companycode": companycode,
             "yearcode": yearcode,
             "invoice": invoice,
             "strict_total": strict_total,
+            "file_hash": file_hash,
         }
         digest = payload_digest(payload)
         preview_id = uuid.uuid4().hex
@@ -193,6 +196,118 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "expires_at": expires_at,
             "preview": preview_data,
         }
+
+    def prepare_invoice_previews(
+        invoices: list,
+        connection: Any,
+        *,
+        companycode: str,
+        yearcode: str,
+        strict_total: bool,
+        file_hash: str | None = None,
+    ) -> Dict[str, Any]:
+        preview_results = []
+        resolution_issues = []
+        duplicates = []
+        for invoice in invoices:
+            issues = inspect_purchase_mappings(
+                invoice,
+                connection,
+                companycode=companycode,
+                mapping_config=current_mapping_config(),
+                supplier_lookup_sql=settings.supplier_lookup_sql,
+                item_lookup_sql=settings.item_lookup_sql,
+                item_code_verify_sql=settings.item_code_verify_sql,
+                strict_total=strict_total,
+            )
+            for issue in issues:
+                issue["suggestions"] = master_suggestions(connection, issue, companycode)
+                issue["actions"] = {
+                    "search_master": True,
+                    "save_mapping": True,
+                    "check_live_stock": issue["type"] == "item",
+                    "create_in_erp": issue["type"] == "item",
+                    "instant_create_available": False,
+                }
+            resolution_issues.extend(issues)
+            if issues:
+                continue
+            preview_data = preview_purchase(
+                invoice,
+                connection,
+                companycode=companycode,
+                yearcode=yearcode,
+                mapping_config=current_mapping_config(),
+                supplier_lookup_sql=settings.supplier_lookup_sql,
+                item_lookup_sql=settings.item_lookup_sql,
+                item_code_verify_sql=settings.item_code_verify_sql,
+                strict_total=strict_total,
+            )
+            cursor = connection.cursor()
+            try:
+                existing = db.find_existing_purchase(
+                    cursor,
+                    companycode,
+                    yearcode,
+                    preview_data["suppliercode"],
+                    preview_data["docno"],
+                )
+            finally:
+                cursor.close()
+                connection.rollback()
+            if existing:
+                duplicates.append(
+                    {
+                        "suppliercode": preview_data["suppliercode"],
+                        "docno": preview_data["docno"],
+                        **existing,
+                    }
+                )
+                continue
+            preview_results.append((invoice, preview_data))
+        if resolution_issues:
+            resolution_id = uuid.uuid4().hex
+            expires_at = int(time.time()) + settings.approval_ttl_seconds
+            store.create_resolution(
+                resolution_id,
+                expires_at,
+                {
+                    "invoices": invoices,
+                    "companycode": companycode,
+                    "yearcode": yearcode,
+                    "strict_total": strict_total,
+                    "file_hash": file_hash,
+                },
+            )
+            return {
+                "status_code": 409,
+                "body": {
+                    "ready_for_insert": False,
+                    "resolution_required": True,
+                    "resolution_id": resolution_id,
+                    "expires_at": expires_at,
+                    "unresolved_count": len(resolution_issues),
+                    "unresolved": resolution_issues,
+                    "action": "Resolve each issue, then retry using the resolution_id.",
+                },
+            }
+        if duplicates:
+            return {
+                "status_code": 409,
+                "body": {
+                    "ready_for_insert": False,
+                    "duplicate": True,
+                    "duplicates": duplicates,
+                    "action": "Open the existing ERP purchase. No insert is allowed.",
+                },
+            }
+        approvals = [
+            create_preview_approval(
+                invoice, companycode, yearcode, strict_total, preview_data, file_hash
+            )
+            for invoice, preview_data in preview_results
+        ]
+        return {"status_code": 200, "body": {"ready_for_insert": True, "purchases": approvals}}
 
     @app.exception_handler(ValidationError)
     @app.exception_handler(PdfPurchaseAdapterError)
@@ -249,7 +364,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         pdf: UploadFile = File(...),
         _: None = Depends(auth),
     ) -> Dict[str, Any]:
-        filename, path = await save_pdf_upload(pdf)
+        filename, path, _ = await save_pdf_upload(pdf)
         try:
             extracted = extract_pdf(path)
             logger.info("Extracted PDF file=%s pages=%s.", filename, extracted["page_count"])
@@ -266,9 +381,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: None = Depends(auth),
     ) -> Dict[str, Any]:
         """Extract PDF, normalize purchases, validate masters, and create approvals."""
-        filename, path = await save_pdf_upload(pdf)
+        filename, path, file_hash = await save_pdf_upload(pdf)
         connection = open_connection()
         try:
+            previous = store.find_inserted_by_file_hash(file_hash)
+            if previous:
+                return JSONResponse(
+                    status_code=409,
+                    content=jsonable_encoder(
+                        {
+                            "ready_for_insert": False,
+                            "duplicate": True,
+                            "duplicate_type": "exact_pdf",
+                            "existing_preview_id": previous["preview_id"],
+                            "existing_result": previous.get("result_json"),
+                            "action": "Open the existing ERP purchase. No insert is allowed.",
+                        }
+                    ),
+                )
             extracted = extract_pdf(path)
             try:
                 invoices = normalize_extracted_purchases(extracted)
@@ -285,71 +415,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         ),
                     },
                 ) from exc
-            preview_results = []
-            resolution_issues = []
-            for invoice in invoices:
-                issues = inspect_purchase_mappings(
-                    invoice,
-                    connection,
-                    companycode=companycode,
-                    mapping_config=current_mapping_config(),
-                    supplier_lookup_sql=settings.supplier_lookup_sql,
-                    item_lookup_sql=settings.item_lookup_sql,
-                    item_code_verify_sql=settings.item_code_verify_sql,
-                    strict_total=strict_total,
-                )
-                for issue in issues:
-                    issue["suggestions"] = master_suggestions(connection, issue, companycode)
-                    issue["actions"] = {
-                        "search_master": True,
-                        "save_mapping": True,
-                        "check_live_stock": issue["type"] == "item",
-                        "create_in_erp": issue["type"] == "item",
-                        "instant_create_available": False,
-                    }
-                resolution_issues.extend(issues)
-                if issues:
-                    continue
-                preview_results.append(
-                    (
-                        invoice,
-                        preview_purchase(
-                            invoice,
-                            connection,
-                            companycode=companycode,
-                            yearcode=yearcode,
-                            mapping_config=current_mapping_config(),
-                            supplier_lookup_sql=settings.supplier_lookup_sql,
-                            item_lookup_sql=settings.item_lookup_sql,
-                            item_code_verify_sql=settings.item_code_verify_sql,
-                            strict_total=strict_total,
-                        ),
-                    )
-                )
-            if resolution_issues:
-                return JSONResponse(
-                    status_code=409,
-                    content=jsonable_encoder({
-                        "ready_for_insert": False,
-                        "source_file": filename,
-                        "resolution_required": True,
-                        "unresolved_count": len(resolution_issues),
-                        "unresolved": resolution_issues,
-                        "action": (
-                            "Resolve each master-data issue, save its mapping, then retry preview."
-                        ),
-                    }),
-                )
-            approvals = [
-                create_preview_approval(
-                    invoice,
-                    companycode,
-                    yearcode,
-                    strict_total,
-                    preview_data,
-                )
-                for invoice, preview_data in preview_results
-            ]
+            prepared = prepare_invoice_previews(
+                invoices,
+                connection,
+                companycode=companycode,
+                yearcode=yearcode,
+                strict_total=strict_total,
+                file_hash=file_hash,
+            )
+            body = prepared["body"]
+            body["source_file"] = filename
+            if prepared["status_code"] != 200:
+                return JSONResponse(status_code=prepared["status_code"], content=jsonable_encoder(body))
+            approvals = body["purchases"]
             logger.info(
                 "Prepared PDF purchase previews file=%s purchases=%s.",
                 filename,
@@ -555,8 +633,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: None = Depends(auth),
     ) -> Dict[str, Any]:
         source_name = request.source_name.strip()
-        batch = request.batch.strip()
+        batch = (request.batch or "").strip()
         item_code = request.item_code.strip()
+        if request.ml is None and not batch:
+            raise HTTPException(status_code=422, detail="Item mapping requires ml or legacy batch.")
         connection = open_connection()
         cursor = connection.cursor()
         try:
@@ -570,10 +650,38 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             cursor.close()
             connection.rollback()
             connection.close()
-        mapping_key = f"{source_name}|{batch}"
+        normalized_name = " ".join(source_name.upper().split())
+        mapping_key = (
+            f"{normalized_name}|ML:{request.ml:.2f}"
+            if request.ml is not None
+            else f"{source_name}|{batch}"
+        )
         mapping_store.set_item(mapping_key, verified_code)
         logger.info("Saved item mapping key=%s code=%s.", mapping_key, verified_code)
         return {"saved": True, "mapping_key": mapping_key, "item_code": verified_code}
+
+    @app.post("/api/v1/resolutions/{resolution_id}/retry")
+    def retry_resolution(resolution_id: str, _: None = Depends(auth)) -> Any:
+        state = store.get_resolution(resolution_id)
+        if state is None:
+            raise HTTPException(status_code=404, detail="Resolution session not found or expired.")
+        payload = state["payload_json"]
+        connection = open_connection()
+        try:
+            prepared = prepare_invoice_previews(
+                payload["invoices"],
+                connection,
+                companycode=payload["companycode"],
+                yearcode=payload["yearcode"],
+                strict_total=payload["strict_total"],
+                file_hash=payload.get("file_hash"),
+            )
+            return JSONResponse(
+                status_code=prepared["status_code"],
+                content=jsonable_encoder(prepared["body"]),
+            )
+        finally:
+            connection.close()
 
     @app.delete("/api/v1/mappings/items")
     def delete_item_mapping(

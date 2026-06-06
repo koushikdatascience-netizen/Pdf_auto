@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.5.0 - 2026-06-06
+
+- Detect existing supplier/document-number purchases during PDF preview.
+- Detect exact previously inserted PDFs using SHA-256.
+- Add reusable resolution sessions so mappings can be fixed without re-uploading.
+- Prefer stable normalized item-name plus ML mappings, with legacy batch mappings
+  retained for compatibility.
+
 ## 1.4.1 - 2026-06-06
 
 - Populate sequential `purchasedetail.slno` values so ERP screens can display
