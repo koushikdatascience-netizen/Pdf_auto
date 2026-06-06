@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4.1 - 2026-06-06
+
+- Populate sequential `purchasedetail.slno` values so ERP screens can display
+  inserted purchase line items.
+
 ## 1.4.0 - 2026-06-06
 
 - Return all unresolved PDF supplier/item mappings together.

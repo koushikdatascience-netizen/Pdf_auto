@@ -34,9 +34,9 @@ VALUES (?, ?, ?, ?, ?, ?, ?)
 
 INSERT_PURCHASEDETAIL = """
 INSERT INTO dbo.purchasedetail
-    (companycode, yearcode, trnid, trnno, itemcode, batchno,
+    (companycode, yearcode, trnid, trnno, slno, itemcode, batchno,
      itemrate, itemquantity, itemamount, trndate)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """.strip()
 
 INSERT_PURCHASETAXDETAIL = """

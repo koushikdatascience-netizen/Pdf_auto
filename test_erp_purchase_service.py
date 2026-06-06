@@ -149,6 +149,10 @@ class PurchaseServiceTests(unittest.TestCase):
         self.assertEqual(output["trnno"], 77)
         self.assertTrue(all(row[2] == 1001 for row in connection.cursor_value.detail_rows))
         self.assertTrue(all(row[3] == 77 for row in connection.cursor_value.detail_rows))
+        self.assertEqual(
+            [row[4] for row in connection.cursor_value.detail_rows],
+            [1, 2],
+        )
 
         inserts = [
             sql for sql, _ in connection.cursor_value.executed if "INSERT INTO" in sql.upper()

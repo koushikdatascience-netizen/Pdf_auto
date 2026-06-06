@@ -260,6 +260,7 @@ def insert_purchase(
                     yearcode,
                     trnid,
                     trnno,
+                    line_number,
                     item.item_code,
                     item.source.batch,
                     item.source.rate,
@@ -267,7 +268,7 @@ def insert_purchase(
                     item.source.amount,
                     invoice.date,
                 )
-                for item in resolved.items
+                for line_number, item in enumerate(resolved.items, start=1)
             ],
         )
         tax_rows = db.insert_purchase_tax(
