@@ -13,16 +13,33 @@ $headers = @{"X-API-Key" = $config.api_key}
 
 Write-Host "Uploading PDF, extracting products, and validating ERP masters..."
 $resolvedPdf = (Resolve-Path -LiteralPath $PdfFile).Path
-$responseText = & curl.exe --silent --show-error --fail-with-body `
+$responseFile = [IO.Path]::GetTempFileName()
+$statusCode = & curl.exe --silent --show-error `
   -X POST `
   -H "X-API-Key: $($config.api_key)" `
   -F "companycode=$CompanyCode" `
   -F "yearcode=$YearCode" `
   -F "strict_total=true" `
   -F "pdf=@$resolvedPdf;type=application/pdf" `
+  --output $responseFile `
+  --write-out "%{http_code}" `
   "$BaseUrl/api/v1/purchases/from-pdf/preview"
-if ($LASTEXITCODE -ne 0) {
-  throw "PDF preview request failed."
+$curlExitCode = $LASTEXITCODE
+$responseText = Get-Content -LiteralPath $responseFile -Raw
+Remove-Item -LiteralPath $responseFile -Force
+
+if ($curlExitCode -ne 0) {
+  throw "Unable to connect to the integration agent."
+}
+if ([int]$statusCode -lt 200 -or [int]$statusCode -ge 300) {
+  Write-Host "Agent rejected the PDF:" -ForegroundColor Red
+  try {
+    ($responseText | ConvertFrom-Json) | ConvertTo-Json -Depth 20
+  }
+  catch {
+    Write-Host $responseText
+  }
+  throw "PDF preview failed with HTTP $statusCode."
 }
 $preview = $responseText | ConvertFrom-Json
 
