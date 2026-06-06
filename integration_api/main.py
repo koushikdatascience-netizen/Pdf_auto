@@ -202,7 +202,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         connection = open_connection()
         try:
             extracted = extract_pdf(path)
-            invoices = normalize_extracted_purchases(extracted)
+            try:
+                invoices = normalize_extracted_purchases(extracted)
+            except PdfPurchaseAdapterError as exc:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "message": str(exc),
+                        "extraction_method": extracted.get("extraction_method"),
+                        "needs_ocr": extracted.get("needs_ocr"),
+                        "items_extracted": len(extracted.get("items") or []),
+                        "manufacturer_groups_extracted": len(
+                            extracted.get("manufacturer_groups") or []
+                        ),
+                    },
+                ) from exc
             preview_results = []
             for invoice in invoices:
                 preview_results.append(

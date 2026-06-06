@@ -163,6 +163,30 @@ class ChallanAdapterTests(unittest.TestCase):
             "ABC TRADERS PRIVATE LIMITED INDUSTRIAL AREA CITY",
         )
 
+    def test_extracts_non_fl_batch_prefix(self):
+        lines = [
+            "1",
+            "STRONG BEER [BR/2026-2027/0042]",
+            "650",
+            "(Glass",
+            "Bottle)",
+            "5",
+            "10.00",
+            "500.00",
+            "100.00",
+            "BREWERY PRIVATE LIMITED",
+            "Total:",
+            "5",
+            "10.00",
+            "500.00",
+            "100.00",
+            "Grand Total",
+        ]
+        items, groups = parse_items(lines)
+        self.assertEqual(items[0]["label_name"], "STRONG BEER")
+        self.assertEqual(items[0]["batch"], "BR/2026-2027/0042")
+        self.assertEqual(groups[0]["manufacturer"], "BREWERY PRIVATE LIMITED")
+
 
 if __name__ == "__main__":
     unittest.main()

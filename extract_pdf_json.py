@@ -9,7 +9,10 @@ import fitz
 
 MONEY_RE = re.compile(r"^\d+(?:\.\d{2})$")
 INT_RE = re.compile(r"^\d+$")
-BATCH_RE = re.compile(r"\[FL/[^\]]+\]")
+# Batch prefixes vary by product type and ERP source, for example FL/, BR/,
+# BEER/, or another code. Require a slash inside brackets so ordinary bracketed
+# label text is not mistaken for a batch number.
+BATCH_RE = re.compile(r"\[[^\[\]\r\n]*[/\\][^\[\]\r\n]*\]")
 
 
 def clean_lines(text):
@@ -24,7 +27,8 @@ def file_signature(path):
 def normalize_join(parts):
     text = " ".join(part.strip() for part in parts if part.strip())
     text = re.sub(r"\s+", " ", text)
-    text = text.replace("[FL/2022- 2023/", "[FL/2022-2023/")
+    text = re.sub(r"(?<=\d)-\s+(?=\d)", "-", text)
+    text = re.sub(r"(?<=[/\\])\s+(?=[A-Za-z0-9])", "", text)
     return text.strip()
 
 

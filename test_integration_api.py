@@ -225,6 +225,26 @@ class IntegrationApiTests(unittest.TestCase):
         self.assertEqual(body["purchases"][0]["preview"]["totamount"], "240.00")
         self.assertIn("approval_token", body["purchases"][0])
 
+    @patch(
+        "integration_api.main.extract_pdf",
+        return_value={
+            **EXTRACTED,
+            "items": [{**EXTRACTED["items"][0], "batch": None}],
+        },
+    )
+    def test_pdf_validation_error_includes_extraction_diagnostics(self, _):
+        response = self.client.post(
+            "/api/v1/purchases/from-pdf/preview",
+            headers=self.headers,
+            data={"companycode": "2", "yearcode": "8", "strict_total": "true"},
+            files={"pdf": ("invoice.pdf", b"%PDF-1.4 test", "application/pdf")},
+        )
+        self.assertEqual(response.status_code, 422, response.text)
+        detail = response.json()["detail"]
+        self.assertIn("batch", detail["message"])
+        self.assertEqual(detail["extraction_method"], "native_pdf_text_pymupdf")
+        self.assertEqual(detail["items_extracted"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
