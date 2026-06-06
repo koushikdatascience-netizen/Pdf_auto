@@ -153,14 +153,24 @@ Important settings:
 }
 ```
 
-Use `api_config.example.json` as the public template. Supplier aliases and item
-mappings can be configured under `mappings`.
+Use `api_config.example.json` as the public template. The `mappings` section is
+supported for installation defaults, but normal users and the ERP EXE should
+manage mappings through the API.
 
 ## Missing Master Data
 
 The service does not create suppliers or items. When a supplier or item is
-missing, preview returns HTTP `409`. Add the record through the ERP master-data
-screen, then preview the invoice again.
+missing, preview returns HTTP `409`. The EXE can let the user select an existing
+ERP master and save a persistent mapping, then retry the invoice.
+
+Mappings are verified against ERP masters, work immediately, and persist in
+`agent_data/mappings.json`. No manual `api_config.json` edit or restart is
+required.
+
+```powershell
+.\save_supplier_mapping.ps1 -SourceName "PDF SUPPLIER" -TargetName "ERP SUPPLIER"
+.\save_item_mapping.ps1 -SourceName "PDF ITEM" -Batch "PDF-BATCH" -ItemCode "ERP_CODE"
+```
 
 ## Build A Standalone EXE
 
@@ -190,6 +200,7 @@ python -B -m unittest discover -v
 Main modules:
 
 - `integration_api/`: FastAPI application, security, and idempotency state.
+- `integration_api/mapping_store.py`: persistent EXE-managed supplier/item mappings.
 - `validation.py`: invoice validation and normalization.
 - `mapping_service.py`: supplier/item resolution.
 - `db.py`: approved SQL statements and concurrency-safe ID generation.

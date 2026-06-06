@@ -36,6 +36,7 @@ class Settings:
     state_db_path: Path
     audit_log_path: Path
     upload_dir: Path
+    mapping_store_path: Path
     supplier_lookup_sql: str
     item_lookup_sql: str
     item_code_verify_sql: str
@@ -88,6 +89,7 @@ def load_settings() -> Settings:
         state_db_path=data_dir / "state",
         audit_log_path=data_dir / "audit.log",
         upload_dir=data_dir / "uploads",
+        mapping_store_path=data_dir / "mappings.json",
         supplier_lookup_sql=os.environ.get(
             "ERP_SUPPLIER_LOOKUP_SQL",
             str(config.get("supplier_lookup_sql", DEFAULT_SUPPLIER_LOOKUP_SQL)),

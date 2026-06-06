@@ -54,6 +54,7 @@ Back up:
 api_config.json
 agent_data/audit.log
 agent_data/state/
+agent_data/mappings.json
 ```
 
 Restrict filesystem access to the ERP user/service account.

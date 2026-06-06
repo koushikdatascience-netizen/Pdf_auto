@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.0 - 2026-06-06
+
+- Added persistent supplier and item mappings managed through API endpoints.
+- Added ERP supplier/item search endpoints for EXE selection screens.
+- Added structured unresolved-master responses.
+- Added verified mapping save/delete operations with no restart required.
+- Removed manual `api_config.json` edits for each new supplier/item.
+
 ## 1.2.0 - 2026-06-05
 
 - Added complete PDF-to-purchase-preview orchestration endpoint.

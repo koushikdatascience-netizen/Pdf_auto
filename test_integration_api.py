@@ -65,7 +65,11 @@ class FakeCursor:
 
     def execute(self, sql, *params):
         normalized = " ".join(sql.upper().split())
-        if "MASTERACCOUNTSLEDGER" in normalized:
+        if "SELECT TOP 25 LEDGERCODE" in normalized:
+            self.result = [("B00011", "BEVCO (FL)")]
+        elif "SELECT TOP 25 ITEMCODE" in normalized:
+            self.result = [("B00025", "BAGPIPER 375 ML", 375, "24", "25 UP")]
+        elif "MASTERACCOUNTSLEDGER" in normalized:
             self.result = [("B00011",)]
         elif "FROM DBO.ITEMMST" in normalized:
             self.result = [(params[0],)]
@@ -131,6 +135,7 @@ class IntegrationApiTests(unittest.TestCase):
             state_db_path=root / "state.sqlite3",
             audit_log_path=root / "audit.log",
             upload_dir=root / "uploads",
+            mapping_store_path=root / "mappings.json",
             supplier_lookup_sql=(
                 "SELECT ledgerCode FROM dbo.MasterAccountsLedger "
                 "WHERE ledgerName=? AND companyCode=?"
@@ -167,6 +172,58 @@ class IntegrationApiTests(unittest.TestCase):
     def test_authentication_required(self):
         response = self.client.get("/api/v1/health")
         self.assertEqual(response.status_code, 401)
+
+    def test_supplier_mapping_is_verified_saved_and_available_without_restart(self):
+        saved = self.client.post(
+            "/api/v1/mappings/suppliers",
+            headers=self.headers,
+            json={
+                "companycode": "2",
+                "source_name": "PDF SUPPLIER NAME",
+                "target_name": "BEVCO (FL)",
+            },
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        self.assertEqual(saved.json()["suppliercode"], "B00011")
+
+        mappings = self.client.get("/api/v1/mappings", headers=self.headers)
+        self.assertEqual(mappings.status_code, 200)
+        self.assertEqual(
+            mappings.json()["supplier_aliases"]["PDF SUPPLIER NAME"],
+            "BEVCO (FL)",
+        )
+
+    def test_item_mapping_is_verified_and_saved(self):
+        saved = self.client.post(
+            "/api/v1/mappings/items",
+            headers=self.headers,
+            json={
+                "source_name": "PDF ITEM",
+                "batch": "PDF-BATCH",
+                "item_code": "B00025",
+            },
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        self.assertEqual(saved.json()["mapping_key"], "PDF ITEM|PDF-BATCH")
+        mappings = self.client.get("/api/v1/mappings", headers=self.headers).json()
+        self.assertEqual(mappings["item_mappings"]["PDF ITEM|PDF-BATCH"], "B00025")
+
+    def test_erp_master_search_endpoints(self):
+        suppliers = self.client.get(
+            "/api/v1/masters/suppliers",
+            headers=self.headers,
+            params={"companycode": "2", "query": "BEVCO"},
+        )
+        self.assertEqual(suppliers.status_code, 200, suppliers.text)
+        self.assertEqual(suppliers.json()["results"][0]["suppliercode"], "B00011")
+
+        items = self.client.get(
+            "/api/v1/masters/items",
+            headers=self.headers,
+            params={"query": "BAGPIPER"},
+        )
+        self.assertEqual(items.status_code, 200, items.text)
+        self.assertEqual(items.json()["results"][0]["itemcode"], "B00025")
 
     def test_invalid_pdf_is_rejected(self):
         response = self.client.post(

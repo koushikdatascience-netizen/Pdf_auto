@@ -36,6 +36,19 @@ WHERE itemcode = ?
 class MappingError(DatabaseError):
     """Raised when supplier or item mapping cannot be resolved uniquely."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        mapping_type: Optional[str] = None,
+        source: Optional[str] = None,
+        mapping_key: Optional[str] = None,
+    ):
+        super().__init__(message)
+        self.mapping_type = mapping_type
+        self.source = source
+        self.mapping_key = mapping_key
+
 
 @dataclass(frozen=True)
 class MappingConfig:
@@ -96,7 +109,11 @@ def resolve_supplier_code(
             f"Supplier '{lookup_name}'",
         )
     except DatabaseError as exc:
-        raise MappingError(str(exc)) from exc
+        raise MappingError(
+            str(exc),
+            mapping_type="supplier",
+            source=supplier_name,
+        ) from exc
 
 
 def resolve_item_code(
@@ -138,7 +155,12 @@ def resolve_item_code(
         )
         return verified_code
     except DatabaseError as exc:
-        raise MappingError(str(exc)) from exc
+        raise MappingError(
+            str(exc),
+            mapping_type="item",
+            source=item.item_name,
+            mapping_key=item_mapping_key(item),
+        ) from exc
 
 
 def resolve_invoice(

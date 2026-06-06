@@ -10,12 +10,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 
 import db
 from extract_pdf_json import extract_pdf
-from mapping_service import MappingError
+from mapping_service import MappingConfig, MappingError
 from pdf_purchase_adapter import PdfPurchaseAdapterError, normalize_extracted_purchases
 from purchase_service import insert_purchase, preview_purchase
 from purchase_service import PurchaseServiceError
@@ -28,7 +28,13 @@ from schema_check import (
 from validation import ValidationError
 
 from .config import Settings, load_settings
-from .models import PurchaseInsertRequest, PurchasePreviewRequest
+from .mapping_store import MappingStore
+from .models import (
+    ItemMappingRequest,
+    PurchaseInsertRequest,
+    PurchasePreviewRequest,
+    SupplierMappingRequest,
+)
 from .security import (
     create_approval_token,
     payload_digest,
@@ -55,6 +61,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     audit_handler = _configure_logging(settings)
     logger = logging.getLogger("integration_api")
     store = StateStore(settings.state_db_path)
+    mapping_store = MappingStore(settings.mapping_store_path)
     auth = require_api_key(settings.api_key)
 
     @asynccontextmanager
@@ -67,7 +74,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="Local ERP Purchase Integration Agent",
-        version="1.2.0",
+        version="1.3.0",
         docs_url="/docs" if settings.enable_docs else None,
         redoc_url=None,
         openapi_url="/openapi.json" if settings.enable_docs else None,
@@ -75,6 +82,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
     app.state.store = store
+    app.state.mapping_store = mapping_store
     app.state.audit_handler = audit_handler
 
     def open_connection() -> Any:
@@ -84,6 +92,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return db.connect(settings.connection_string)
         except Exception as exc:
             raise HTTPException(status_code=503, detail=f"Database connection failed: {exc}") from exc
+
+    def current_mapping_config() -> MappingConfig:
+        return mapping_store.snapshot(settings.mapping_config)
 
     async def save_pdf_upload(pdf: UploadFile) -> tuple[str, Path]:
         filename = Path(pdf.filename or "upload.pdf").name
@@ -144,6 +155,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "ready_for_insert": False,
                 "detail": str(exc),
                 "action": "Add or correct the supplier/item master record, then preview again.",
+                "unresolved": {
+                    "type": exc.mapping_type,
+                    "source": exc.source,
+                    "mapping_key": exc.mapping_key,
+                },
             },
         )
 
@@ -227,7 +243,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                             connection,
                             companycode=companycode,
                             yearcode=yearcode,
-                            mapping_config=settings.mapping_config,
+                            mapping_config=current_mapping_config(),
                             supplier_lookup_sql=settings.supplier_lookup_sql,
                             item_lookup_sql=settings.item_lookup_sql,
                             item_code_verify_sql=settings.item_code_verify_sql,
@@ -310,6 +326,144 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             connection.rollback()
             connection.close()
 
+    @app.get("/api/v1/mappings")
+    def list_mappings(_: None = Depends(auth)) -> Dict[str, Any]:
+        return mapping_store.list()
+
+    @app.get("/api/v1/masters/suppliers")
+    def search_suppliers(
+        companycode: str = Query(min_length=1, max_length=6),
+        query: str = Query(min_length=1),
+        _: None = Depends(auth),
+    ) -> Dict[str, Any]:
+        connection = open_connection()
+        cursor = connection.cursor()
+        try:
+            cursor.execute(
+                """
+                SELECT TOP 25 ledgerCode, ledgerName
+                FROM dbo.MasterAccountsLedger
+                WHERE companyCode = ? AND ledgerName LIKE ?
+                ORDER BY ledgerName
+                """,
+                companycode,
+                f"%{query.strip()}%",
+            )
+            return {
+                "results": [
+                    {"suppliercode": str(row[0]).strip(), "supplier_name": str(row[1]).strip()}
+                    for row in cursor.fetchall()
+                ]
+            }
+        finally:
+            cursor.close()
+            connection.rollback()
+            connection.close()
+
+    @app.get("/api/v1/masters/items")
+    def search_items(
+        query: str = Query(min_length=1),
+        _: None = Depends(auth),
+    ) -> Dict[str, Any]:
+        connection = open_connection()
+        cursor = connection.cursor()
+        try:
+            cursor.execute(
+                """
+                SELECT TOP 25 itemcode, itemname, ml, packing, strengthname
+                FROM dbo.itemmst
+                WHERE itemname LIKE ? OR itemcode LIKE ?
+                ORDER BY itemname
+                """,
+                f"%{query.strip()}%",
+                f"%{query.strip()}%",
+            )
+            return {
+                "results": [
+                    {
+                        "itemcode": str(row[0]).strip(),
+                        "item_name": str(row[1]).strip(),
+                        "ml": row[2],
+                        "packing": row[3],
+                        "strength_name": row[4],
+                    }
+                    for row in cursor.fetchall()
+                ]
+            }
+        finally:
+            cursor.close()
+            connection.rollback()
+            connection.close()
+
+    @app.post("/api/v1/mappings/suppliers")
+    def save_supplier_mapping(
+        request: SupplierMappingRequest,
+        _: None = Depends(auth),
+    ) -> Dict[str, Any]:
+        source_name = request.source_name.strip()
+        target_name = request.target_name.strip()
+        connection = open_connection()
+        cursor = connection.cursor()
+        try:
+            suppliercode = db.lookup_single_value(
+                cursor,
+                settings.supplier_lookup_sql,
+                (target_name, request.companycode),
+                f"Supplier '{target_name}'",
+            )
+        finally:
+            cursor.close()
+            connection.rollback()
+            connection.close()
+        mapping_store.set_supplier(source_name, target_name)
+        logger.info("Saved supplier mapping source=%s target=%s.", source_name, target_name)
+        return {
+            "saved": True,
+            "source_name": source_name,
+            "target_name": target_name,
+            "suppliercode": suppliercode,
+        }
+
+    @app.delete("/api/v1/mappings/suppliers")
+    def delete_supplier_mapping(
+        source_name: str = Query(min_length=1),
+        _: None = Depends(auth),
+    ) -> Dict[str, Any]:
+        return {"deleted": mapping_store.delete_supplier(source_name.strip())}
+
+    @app.post("/api/v1/mappings/items")
+    def save_item_mapping(
+        request: ItemMappingRequest,
+        _: None = Depends(auth),
+    ) -> Dict[str, Any]:
+        source_name = request.source_name.strip()
+        batch = request.batch.strip()
+        item_code = request.item_code.strip()
+        connection = open_connection()
+        cursor = connection.cursor()
+        try:
+            verified_code = db.lookup_single_value(
+                cursor,
+                settings.item_code_verify_sql,
+                (item_code,),
+                f"Item code '{item_code}'",
+            )
+        finally:
+            cursor.close()
+            connection.rollback()
+            connection.close()
+        mapping_key = f"{source_name}|{batch}"
+        mapping_store.set_item(mapping_key, verified_code)
+        logger.info("Saved item mapping key=%s code=%s.", mapping_key, verified_code)
+        return {"saved": True, "mapping_key": mapping_key, "item_code": verified_code}
+
+    @app.delete("/api/v1/mappings/items")
+    def delete_item_mapping(
+        mapping_key: str = Query(min_length=1),
+        _: None = Depends(auth),
+    ) -> Dict[str, Any]:
+        return {"deleted": mapping_store.delete_item(mapping_key.strip())}
+
     @app.post("/api/v1/purchases/preview")
     def preview(request: PurchasePreviewRequest, _: None = Depends(auth)) -> Dict[str, Any]:
         connection = open_connection()
@@ -319,7 +473,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 connection,
                 companycode=request.companycode,
                 yearcode=request.yearcode,
-                mapping_config=settings.mapping_config,
+                mapping_config=current_mapping_config(),
                 supplier_lookup_sql=settings.supplier_lookup_sql,
                 item_lookup_sql=settings.item_lookup_sql,
                 item_code_verify_sql=settings.item_code_verify_sql,
@@ -368,7 +522,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 connection,
                 companycode=payload["companycode"],
                 yearcode=payload["yearcode"],
-                mapping_config=settings.mapping_config,
+                mapping_config=current_mapping_config(),
                 supplier_lookup_sql=settings.supplier_lookup_sql,
                 item_lookup_sql=settings.item_lookup_sql,
                 item_code_verify_sql=settings.item_code_verify_sql,

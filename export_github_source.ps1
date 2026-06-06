@@ -35,6 +35,8 @@ $files = @(
   "export_github_source.ps1",
   "test_api_flow.ps1",
   "test_pdf_flow.ps1",
+  "save_supplier_mapping.ps1",
+  "save_item_mapping.ps1",
   "run_agent.py",
   "schema_check.py",
   "db.py",
@@ -55,7 +57,8 @@ $files = @(
   "test_erp_purchase_service.py",
   "test_integration_api.py",
   "test_purchase_db.py",
-  "test_pdf_purchase_adapter.py"
+  "test_pdf_purchase_adapter.py",
+  "test_mapping_store.py"
 )
 
 $directories = @(

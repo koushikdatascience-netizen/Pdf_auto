@@ -141,12 +141,51 @@ If supplier or item master data is missing, the API returns HTTP `409`:
 {
   "ready_for_insert": false,
   "detail": "Item code '...' lookup returned no match.",
-  "action": "Add or correct the supplier/item master record, then preview again."
+  "action": "Add or correct the supplier/item master record, then preview again.",
+  "unresolved": {
+    "type": "item",
+    "source": "PDF ITEM NAME",
+    "mapping_key": "PDF ITEM NAME|PDF-BATCH"
+  }
 }
 ```
 
-The EXE must show this message and direct the user to the ERP item/supplier
-master screen. Preview must be called again after master creation.
+The EXE should let the user create the missing master or select an existing ERP
+master and save a mapping. Preview must be called again afterward.
+
+### Master Search And Mapping
+
+```http
+GET /api/v1/masters/suppliers?companycode=2&query=Mount%20Everest
+GET /api/v1/masters/items?query=BAGPIPER
+```
+
+Save the user's selected supplier:
+
+```http
+POST /api/v1/mappings/suppliers
+
+{
+  "companycode": "2",
+  "source_name": "PDF EXTRACTED SUPPLIER",
+  "target_name": "EXACT ERP SUPPLIER NAME"
+}
+```
+
+Save the user's selected item:
+
+```http
+POST /api/v1/mappings/items
+
+{
+  "source_name": "PDF EXTRACTED ITEM",
+  "batch": "PDF-BATCH",
+  "item_code": "B00025"
+}
+```
+
+Mappings are verified before saving, persist in `agent_data/mappings.json`, and
+work immediately without restarting the agent.
 
 ### 3. User Approval
 
@@ -189,6 +228,11 @@ Use this when the EXE loses connection after requesting an insert.
 | POST | `/api/v1/purchases/preview` | Validate and resolve masters |
 | POST | `/api/v1/purchases/insert` | Approved transactional insert |
 | GET | `/api/v1/approvals/{preview_id}` | Status/retry recovery |
+| GET | `/api/v1/masters/suppliers` | Search ERP suppliers |
+| GET | `/api/v1/masters/items` | Search ERP items |
+| GET | `/api/v1/mappings` | List saved mappings |
+| POST/DELETE | `/api/v1/mappings/suppliers` | Save/remove supplier mapping |
+| POST/DELETE | `/api/v1/mappings/items` | Save/remove item mapping |
 
 Interactive OpenAPI documentation can be enabled for development by setting
 `enable_docs` to `true`. It is then available locally at:
@@ -245,6 +289,7 @@ The agent stores:
 ```text
 agent_data/audit.log
 agent_data/state/*.json
+agent_data/mappings.json
 ```
 
 The local state files store signed-preview status and idempotency results. They
