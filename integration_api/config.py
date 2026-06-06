@@ -40,6 +40,7 @@ class Settings:
     supplier_lookup_sql: str
     item_lookup_sql: str
     item_code_verify_sql: str
+    item_stock_lookup_sql: str
     transaction_type: str
     usercode: str
     sync: str
@@ -101,6 +102,10 @@ def load_settings() -> Settings:
         item_code_verify_sql=os.environ.get(
             "ERP_ITEM_CODE_VERIFY_SQL",
             str(config.get("item_code_verify_sql", DEFAULT_ITEM_CODE_VERIFY_SQL)),
+        ),
+        item_stock_lookup_sql=os.environ.get(
+            "ERP_ITEM_STOCK_LOOKUP_SQL",
+            str(config.get("item_stock_lookup_sql", "")).strip(),
         ),
         transaction_type=os.environ.get(
             "ERP_PURCHASE_TRANSACTION_TYPE",

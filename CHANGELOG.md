@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.0 - 2026-06-06
+
+- Return all unresolved PDF supplier/item mappings together.
+- Include live ERP master suggestions and operator resolution actions.
+- Add a configurable, read-only live item-stock endpoint.
+- Keep new-item creation inside the ERP-approved item-master workflow.
+
 ## 1.3.0 - 2026-06-06
 
 - Added persistent supplier and item mappings managed through API endpoints.

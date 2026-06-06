@@ -1,6 +1,19 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 
+public sealed class AgentApiException : Exception
+{
+    public int StatusCode { get; }
+    public string ResponseBody { get; }
+
+    public AgentApiException(int statusCode, string responseBody)
+        : base($"Agent returned {statusCode}: {responseBody}")
+    {
+        StatusCode = statusCode;
+        ResponseBody = responseBody;
+    }
+}
+
 public sealed class ErpPurchaseAgentClient
 {
     private readonly HttpClient _http;
@@ -101,6 +114,18 @@ public sealed class ErpPurchaseAgentClient
         return await ReadResponseAsync(response);
     }
 
+    public async Task<JsonDocument> GetItemStockAsync(
+        string itemCode,
+        string companyCode,
+        string yearCode)
+    {
+        var url = $"/api/v1/masters/items/{Uri.EscapeDataString(itemCode)}/stock" +
+                  $"?companycode={Uri.EscapeDataString(companyCode)}" +
+                  $"&yearcode={Uri.EscapeDataString(yearCode)}";
+        using var response = await _http.GetAsync(url);
+        return await ReadResponseAsync(response);
+    }
+
     public async Task<JsonDocument> SaveItemMappingAsync(
         string extractedName,
         string batch,
@@ -121,8 +146,7 @@ public sealed class ErpPurchaseAgentClient
     {
         var body = await response.Content.ReadAsStringAsync();
         if (!response.IsSuccessStatusCode)
-            throw new InvalidOperationException(
-                $"Agent returned {(int)response.StatusCode}: {body}");
+            throw new AgentApiException((int)response.StatusCode, body);
         return JsonDocument.Parse(body);
     }
 }

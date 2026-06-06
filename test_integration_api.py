@@ -67,7 +67,7 @@ class FakeCursor:
         normalized = " ".join(sql.upper().split())
         if "SELECT TOP 25 LEDGERCODE" in normalized:
             self.result = [("B00011", "BEVCO (FL)")]
-        elif "SELECT TOP 25 ITEMCODE" in normalized:
+        elif "SELECT TOP 25 ITEMCODE" in normalized or "SELECT TOP 10 ITEMCODE" in normalized:
             self.result = [("B00025", "BAGPIPER 375 ML", 375, "24", "25 UP")]
         elif "MASTERACCOUNTSLEDGER" in normalized:
             self.result = [("B00011",)]
@@ -142,6 +142,7 @@ class IntegrationApiTests(unittest.TestCase):
             ),
             item_lookup_sql="SELECT itemcode FROM dbo.itemmst WHERE itemname=?",
             item_code_verify_sql="SELECT itemcode FROM dbo.itemmst WHERE itemcode=?",
+            item_stock_lookup_sql="",
             transaction_type="Purchase_Add",
             usercode="A00001",
             sync="N",
@@ -225,6 +226,14 @@ class IntegrationApiTests(unittest.TestCase):
         self.assertEqual(items.status_code, 200, items.text)
         self.assertEqual(items.json()["results"][0]["itemcode"], "B00025")
 
+        stock = self.client.get(
+            "/api/v1/masters/items/B00025/stock",
+            headers=self.headers,
+            params={"companycode": "2", "yearcode": "8"},
+        )
+        self.assertEqual(stock.status_code, 200, stock.text)
+        self.assertFalse(stock.json()["configured"])
+
     def test_invalid_pdf_is_rejected(self):
         response = self.client.post(
             "/api/v1/extract",
@@ -281,6 +290,40 @@ class IntegrationApiTests(unittest.TestCase):
         self.assertEqual(body["purchases"][0]["preview"]["suppliercode"], "B00011")
         self.assertEqual(body["purchases"][0]["preview"]["totamount"], "240.00")
         self.assertIn("approval_token", body["purchases"][0])
+
+    @patch(
+        "integration_api.main.inspect_purchase_mappings",
+        return_value=[
+            {
+                "type": "item",
+                "source": "UNKNOWN BEER",
+                "mapping_key": "UNKNOWN BEER|B-1",
+                "batch": "B-1",
+                "message": "No match.",
+            },
+            {
+                "type": "item",
+                "source": "ANOTHER BEER",
+                "mapping_key": "ANOTHER BEER|B-2",
+                "batch": "B-2",
+                "message": "No match.",
+            },
+        ],
+    )
+    @patch("integration_api.main.extract_pdf", return_value=EXTRACTED)
+    def test_pdf_preview_returns_all_resolution_issues(self, _, __):
+        response = self.client.post(
+            "/api/v1/purchases/from-pdf/preview",
+            headers=self.headers,
+            data={"companycode": "2", "yearcode": "8", "strict_total": "true"},
+            files={"pdf": ("invoice.pdf", b"%PDF-1.4 test", "application/pdf")},
+        )
+        self.assertEqual(response.status_code, 409, response.text)
+        body = response.json()
+        self.assertTrue(body["resolution_required"])
+        self.assertEqual(body["unresolved_count"], 2)
+        self.assertTrue(body["unresolved"][0]["actions"]["search_master"])
+        self.assertTrue(body["unresolved"][0]["actions"]["check_live_stock"])
 
     @patch(
         "integration_api.main.extract_pdf",

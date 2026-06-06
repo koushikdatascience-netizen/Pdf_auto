@@ -135,29 +135,43 @@ Successful response includes:
 }
 ```
 
-If supplier or item master data is missing, the API returns HTTP `409`:
+If supplier or item master data is missing, the API returns every unresolved
+record together in HTTP `409`:
 
 ```json
 {
   "ready_for_insert": false,
-  "detail": "Item code '...' lookup returned no match.",
-  "action": "Add or correct the supplier/item master record, then preview again.",
-  "unresolved": {
+  "resolution_required": true,
+  "unresolved_count": 1,
+  "action": "Resolve each master-data issue, save its mapping, then retry preview.",
+  "unresolved": [{
     "type": "item",
     "source": "PDF ITEM NAME",
-    "mapping_key": "PDF ITEM NAME|PDF-BATCH"
-  }
+    "mapping_key": "PDF ITEM NAME|PDF-BATCH",
+    "suggestions": [],
+    "actions": {
+      "search_master": true,
+      "save_mapping": true,
+      "check_live_stock": true,
+      "create_in_erp": true,
+      "instant_create_available": false
+    }
+  }]
 }
 ```
 
-The EXE should let the user create the missing master or select an existing ERP
-master and save a mapping. Preview must be called again afterward.
+The EXE should display a Resolve Issues screen containing all records. The user
+can select an existing master and save a mapping, check configured live stock,
+or open the ERP's existing item-master screen. Preview must be called again
+afterward. Direct instant creation stays disabled until the ERP team supplies
+its approved item-creation procedure and required fields.
 
 ### Master Search And Mapping
 
 ```http
 GET /api/v1/masters/suppliers?companycode=2&query=Mount%20Everest
 GET /api/v1/masters/items?query=BAGPIPER
+GET /api/v1/masters/items/B00025/stock?companycode=2&yearcode=8
 ```
 
 Save the user's selected supplier:

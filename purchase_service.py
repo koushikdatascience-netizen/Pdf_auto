@@ -12,8 +12,12 @@ from mapping_service import (
     DEFAULT_ITEM_LOOKUP_SQL,
     DEFAULT_SUPPLIER_LOOKUP_SQL,
     MappingConfig,
+    MappingError,
     ResolvedInvoice,
+    item_mapping_key,
+    resolve_item_code,
     resolve_invoice,
+    resolve_supplier_code,
 )
 from validation import ValidatedInvoice, validate_invoice_json
 
@@ -23,6 +27,70 @@ LOGGER = logging.getLogger(__name__)
 
 class PurchaseServiceError(RuntimeError):
     """Raised when preview or insertion fails."""
+
+
+def inspect_purchase_mappings(
+    json_data: Mapping[str, Any],
+    connection: Any,
+    *,
+    companycode: str,
+    mapping_config: Optional[MappingConfig] = None,
+    supplier_lookup_sql: str = DEFAULT_SUPPLIER_LOOKUP_SQL,
+    item_lookup_sql: str = DEFAULT_ITEM_LOOKUP_SQL,
+    item_code_verify_sql: str = DEFAULT_ITEM_CODE_VERIFY_SQL,
+    strict_total: bool = False,
+) -> list[Dict[str, Any]]:
+    """Return every unresolved ERP master reference without stopping at the first."""
+    invoice = validate_invoice_json(json_data, strict_total=strict_total)
+    config = mapping_config or MappingConfig({}, {})
+    cursor = connection.cursor()
+    issues: list[Dict[str, Any]] = []
+    try:
+        try:
+            resolve_supplier_code(
+                cursor,
+                invoice.supplier,
+                companycode,
+                config,
+                supplier_lookup_sql=supplier_lookup_sql,
+            )
+        except MappingError as exc:
+            issues.append(
+                {
+                    "type": "supplier",
+                    "source": invoice.supplier,
+                    "mapping_key": None,
+                    "message": str(exc),
+                }
+            )
+
+        for item in invoice.items:
+            try:
+                resolve_item_code(
+                    cursor,
+                    item,
+                    companycode,
+                    config,
+                    item_lookup_sql=item_lookup_sql,
+                    item_code_verify_sql=item_code_verify_sql,
+                )
+            except MappingError as exc:
+                issues.append(
+                    {
+                        "type": "item",
+                        "source": item.item_name,
+                        "mapping_key": item_mapping_key(item),
+                        "batch": item.batch,
+                        "ml": str(item.ml) if item.ml is not None else None,
+                        "packing": item.packing,
+                        "strength_name": item.strength_name,
+                        "message": str(exc),
+                    }
+                )
+        return issues
+    finally:
+        cursor.close()
+        connection.rollback()
 
 
 def _preview_payload(

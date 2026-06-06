@@ -11,13 +11,14 @@ from pathlib import Path
 from typing import Any, Dict
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
 import db
 from extract_pdf_json import extract_pdf
 from mapping_service import MappingConfig, MappingError
 from pdf_purchase_adapter import PdfPurchaseAdapterError, normalize_extracted_purchases
-from purchase_service import insert_purchase, preview_purchase
+from purchase_service import inspect_purchase_mappings, insert_purchase, preview_purchase
 from purchase_service import PurchaseServiceError
 from schema_check import (
     EXPECTED_INSERT_COLUMNS,
@@ -74,7 +75,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="Local ERP Purchase Integration Agent",
-        version="1.3.0",
+        version="1.4.0",
         docs_url="/docs" if settings.enable_docs else None,
         redoc_url=None,
         openapi_url="/openapi.json" if settings.enable_docs else None,
@@ -95,6 +96,57 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     def current_mapping_config() -> MappingConfig:
         return mapping_store.snapshot(settings.mapping_config)
+
+    def require_read_only_sql(sql: str) -> None:
+        normalized = " ".join(sql.upper().split())
+        forbidden = (" INSERT ", " UPDATE ", " DELETE ", " MERGE ", " EXEC ", " DROP ",
+                     " ALTER ", " CREATE ", " TRUNCATE ")
+        padded = f" {normalized} "
+        if not normalized.startswith("SELECT ") or any(token in padded for token in forbidden):
+            raise HTTPException(status_code=503, detail="Configured stock query must be read-only SELECT SQL.")
+
+    def master_suggestions(connection: Any, issue: Dict[str, Any], companycode: str) -> list:
+        cursor = connection.cursor()
+        try:
+            words = [word for word in str(issue["source"]).replace("/", " ").split() if len(word) >= 3]
+            search = words[0] if words else str(issue["source"])
+            if issue["type"] == "supplier":
+                cursor.execute(
+                    """
+                    SELECT TOP 10 ledgerCode, ledgerName
+                    FROM dbo.MasterAccountsLedger
+                    WHERE companyCode = ? AND ledgerName LIKE ?
+                    ORDER BY ledgerName
+                    """,
+                    companycode,
+                    f"%{search}%",
+                )
+                return [
+                    {"suppliercode": str(row[0]).strip(), "supplier_name": str(row[1]).strip()}
+                    for row in cursor.fetchall()
+                ]
+            cursor.execute(
+                """
+                SELECT TOP 10 itemcode, itemname, ml, packing, strengthname
+                FROM dbo.itemmst
+                WHERE itemname LIKE ? OR itemcode LIKE ?
+                ORDER BY itemname
+                """,
+                f"%{search}%",
+                f"%{search}%",
+            )
+            return [
+                {
+                    "itemcode": str(row[0]).strip(),
+                    "item_name": str(row[1]).strip(),
+                    "ml": row[2],
+                    "packing": row[3],
+                    "strength_name": row[4],
+                }
+                for row in cursor.fetchall()
+            ]
+        finally:
+            cursor.close()
 
     async def save_pdf_upload(pdf: UploadFile) -> tuple[str, Path]:
         filename = Path(pdf.filename or "upload.pdf").name
@@ -234,7 +286,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     },
                 ) from exc
             preview_results = []
+            resolution_issues = []
             for invoice in invoices:
+                issues = inspect_purchase_mappings(
+                    invoice,
+                    connection,
+                    companycode=companycode,
+                    mapping_config=current_mapping_config(),
+                    supplier_lookup_sql=settings.supplier_lookup_sql,
+                    item_lookup_sql=settings.item_lookup_sql,
+                    item_code_verify_sql=settings.item_code_verify_sql,
+                    strict_total=strict_total,
+                )
+                for issue in issues:
+                    issue["suggestions"] = master_suggestions(connection, issue, companycode)
+                    issue["actions"] = {
+                        "search_master": True,
+                        "save_mapping": True,
+                        "check_live_stock": issue["type"] == "item",
+                        "create_in_erp": issue["type"] == "item",
+                        "instant_create_available": False,
+                    }
+                resolution_issues.extend(issues)
+                if issues:
+                    continue
                 preview_results.append(
                     (
                         invoice,
@@ -250,6 +325,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                             strict_total=strict_total,
                         ),
                     )
+                )
+            if resolution_issues:
+                return JSONResponse(
+                    status_code=409,
+                    content=jsonable_encoder({
+                        "ready_for_insert": False,
+                        "source_file": filename,
+                        "resolution_required": True,
+                        "unresolved_count": len(resolution_issues),
+                        "unresolved": resolution_issues,
+                        "action": (
+                            "Resolve each master-data issue, save its mapping, then retry preview."
+                        ),
+                    }),
                 )
             approvals = [
                 create_preview_approval(
@@ -389,6 +478,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     }
                     for row in cursor.fetchall()
                 ]
+            }
+        finally:
+            cursor.close()
+            connection.rollback()
+            connection.close()
+
+    @app.get("/api/v1/masters/items/{itemcode}/stock")
+    def item_live_stock(
+        itemcode: str,
+        companycode: str = Query(min_length=1, max_length=6),
+        yearcode: str = Query(min_length=1, max_length=6),
+        _: None = Depends(auth),
+    ) -> Dict[str, Any]:
+        if not settings.item_stock_lookup_sql:
+            return {
+                "configured": False,
+                "itemcode": itemcode,
+                "message": "Live-stock query is not configured for this ERP installation.",
+            }
+        require_read_only_sql(settings.item_stock_lookup_sql)
+        connection = open_connection()
+        cursor = connection.cursor()
+        try:
+            cursor.execute(settings.item_stock_lookup_sql, itemcode, companycode, yearcode)
+            columns = [str(column[0]) for column in cursor.description or []]
+            return {
+                "configured": True,
+                "itemcode": itemcode,
+                "results": [dict(zip(columns, row)) for row in cursor.fetchall()],
             }
         finally:
             cursor.close()

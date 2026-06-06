@@ -131,6 +131,16 @@ The script requires typing `INSERT` before writing to SQL Server.
 2. Show the resolved supplier, items, tax, and totals to the user.
 3. Require explicit user approval.
 4. Call `POST /api/v1/purchases/insert` using the approval token.
+
+If master data is missing, PDF preview returns every unresolved supplier and
+item together with ERP search suggestions. The EXE should show a Resolve Issues
+screen where the operator can search, map, check live stock, or open the ERP
+item-master screen and then retry preview.
+
+Live stock is available through
+`GET /api/v1/masters/items/{itemcode}/stock?companycode=...&yearcode=...` after
+the ERP team configures the read-only `item_stock_lookup_sql`. The agent does
+not directly insert incomplete item-master records.
 5. Save the returned `trnid` and `trnno`.
 
 Every request requires the `X-API-Key` header. See

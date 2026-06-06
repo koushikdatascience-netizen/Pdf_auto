@@ -47,6 +47,7 @@ $config = @{
   supplier_lookup_sql = "SELECT ledgerCode FROM dbo.MasterAccountsLedger WHERE ledgerName=? AND companyCode=?"
   item_lookup_sql = "SELECT itemcode FROM dbo.itemmst WHERE itemname=? AND (? IS NULL OR ml=?) AND (? IS NULL OR packing=?) AND (? IS NULL OR strengthname=?)"
   item_code_verify_sql = "SELECT itemcode FROM dbo.itemmst WHERE itemcode=?"
+  item_stock_lookup_sql = ""
   transaction_type = $TransactionType
   usercode = $UserCode
   sync = $Sync
