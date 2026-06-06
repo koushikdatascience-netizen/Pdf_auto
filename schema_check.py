@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import argparse
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -38,6 +39,7 @@ EXPECTED_INSERT_COLUMNS = {
         "yearcode",
         "trnid",
         "trnno",
+        "slno",
         "itemcode",
         "batchno",
         "itemrate",
@@ -55,6 +57,11 @@ EXPECTED_INSERT_COLUMNS = {
     ],
 }
 
+REQUIRED_MASTER_COLUMNS = {
+    "MasterAccountsLedger": ["companyCode", "ledgerCode", "ledgerName"],
+    "itemmst": ["itemcode", "itemname", "ml", "packing", "strengthname"],
+}
+
 FORBIDDEN_WRITE_TABLES = {
     "transactionmain",
     "transactiondetail",
@@ -68,6 +75,9 @@ def inspect_table(cursor: Any, table: str) -> List[Dict[str, Any]]:
         SELECT
             c.COLUMN_NAME,
             c.DATA_TYPE,
+            c.CHARACTER_MAXIMUM_LENGTH,
+            c.NUMERIC_PRECISION,
+            c.NUMERIC_SCALE,
             c.IS_NULLABLE,
             c.COLUMN_DEFAULT,
             COLUMNPROPERTY(
@@ -85,9 +95,12 @@ def inspect_table(cursor: Any, table: str) -> List[Dict[str, Any]]:
         {
             "name": row[0],
             "type": row[1],
-            "nullable": row[2] == "YES",
-            "default": row[3],
-            "identity": bool(row[4]),
+            "max_length": row[2],
+            "precision": row[3],
+            "scale": row[4],
+            "nullable": row[5] == "YES",
+            "default": row[6],
+            "identity": bool(row[7]),
         }
         for row in cursor.fetchall()
     ]
@@ -122,6 +135,118 @@ def inspect_foreign_keys(cursor: Any, table: str) -> List[Dict[str, str]]:
     ]
 
 
+def inspect_inbound_foreign_keys(cursor: Any, table: str) -> List[Dict[str, str]]:
+    cursor.execute(
+        """
+        SELECT
+            fk.name,
+            OBJECT_SCHEMA_NAME(fkc.parent_object_id),
+            OBJECT_NAME(fkc.parent_object_id),
+            COL_NAME(fkc.parent_object_id, fkc.parent_column_id),
+            COL_NAME(fkc.referenced_object_id, fkc.referenced_column_id)
+        FROM sys.foreign_keys fk
+        JOIN sys.foreign_key_columns fkc
+          ON fkc.constraint_object_id = fk.object_id
+        WHERE fkc.referenced_object_id = OBJECT_ID(?)
+        ORDER BY fk.name
+        """,
+        f"dbo.{table}",
+    )
+    return [
+        {
+            "constraint": row[0],
+            "referencing_schema": row[1],
+            "referencing_table": row[2],
+            "referencing_column": row[3],
+            "referenced_column": row[4],
+        }
+        for row in cursor.fetchall()
+    ]
+
+
+def inspect_indexes(cursor: Any, table: str) -> List[Dict[str, Any]]:
+    cursor.execute(
+        """
+        SELECT
+            i.name,
+            i.is_primary_key,
+            i.is_unique,
+            i.type_desc,
+            COL_NAME(ic.object_id, ic.column_id),
+            ic.key_ordinal
+        FROM sys.indexes i
+        JOIN sys.index_columns ic
+          ON ic.object_id = i.object_id AND ic.index_id = i.index_id
+        WHERE i.object_id = OBJECT_ID(?) AND ic.is_included_column = 0
+        ORDER BY i.index_id, ic.key_ordinal
+        """,
+        f"dbo.{table}",
+    )
+    indexes: Dict[str, Dict[str, Any]] = {}
+    for row in cursor.fetchall():
+        entry = indexes.setdefault(
+            row[0],
+            {
+                "name": row[0],
+                "primary_key": bool(row[1]),
+                "unique": bool(row[2]),
+                "type": row[3],
+                "columns": [],
+            },
+        )
+        entry["columns"].append(row[4])
+    return list(indexes.values())
+
+
+def inspect_checks(cursor: Any, table: str) -> List[Dict[str, str]]:
+    cursor.execute(
+        """
+        SELECT name, definition
+        FROM sys.check_constraints
+        WHERE parent_object_id = OBJECT_ID(?)
+        ORDER BY name
+        """,
+        f"dbo.{table}",
+    )
+    return [{"name": row[0], "definition": row[1]} for row in cursor.fetchall()]
+
+
+def inspect_triggers(cursor: Any, table: str) -> List[Dict[str, Any]]:
+    cursor.execute(
+        """
+        SELECT name, is_disabled, is_instead_of_trigger
+        FROM sys.triggers
+        WHERE parent_id = OBJECT_ID(?)
+        ORDER BY name
+        """,
+        f"dbo.{table}",
+    )
+    return [
+        {"name": row[0], "disabled": bool(row[1]), "instead_of": bool(row[2])}
+        for row in cursor.fetchall()
+    ]
+
+
+def inspect_referencing_modules(cursor: Any, table: str) -> List[Dict[str, str]]:
+    cursor.execute(
+        """
+        SELECT DISTINCT
+            OBJECT_SCHEMA_NAME(m.object_id),
+            OBJECT_NAME(m.object_id),
+            o.type_desc
+        FROM sys.sql_modules m
+        JOIN sys.objects o ON o.object_id = m.object_id
+        WHERE m.definition LIKE ?
+        ORDER BY OBJECT_NAME(m.object_id)
+        """,
+        f"%{table}%",
+    )
+    return [
+        {"schema": row[0], "name": row[1], "type": row[2]}
+        for row in cursor.fetchall()
+    ]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Check ERP purchase schema compatibility.")
     parser.add_argument(
@@ -138,7 +263,17 @@ def main() -> None:
     connection = db.connect(connection_string)
     cursor = connection.cursor()
     try:
-        report: Dict[str, Any] = {"tables": {}, "blocking_issues": []}
+        cursor.execute("SELECT DB_NAME(), @@SERVERNAME, CAST(SERVERPROPERTY('ProductVersion') AS varchar(100))")
+        identity = cursor.fetchone()
+        report: Dict[str, Any] = {
+            "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+            "read_only_audit": True,
+            "database": {"name": identity[0], "server": identity[1], "sql_version": identity[2]},
+            "tables": {},
+            "master_tables": {},
+            "blocking_issues": [],
+            "manual_review": [],
+        }
         for table, inserted_columns in EXPECTED_INSERT_COLUMNS.items():
             columns = inspect_table(cursor, table)
             actual_by_lower = {column["name"].lower(): column for column in columns}
@@ -158,8 +293,15 @@ def main() -> None:
                 "missing_insert_columns": missing_insert_columns,
                 "required_columns_not_inserted": required_not_inserted,
                 "foreign_keys": inspect_foreign_keys(cursor, table),
+                "inbound_foreign_keys": inspect_inbound_foreign_keys(cursor, table),
+                "indexes": inspect_indexes(cursor, table),
+                "check_constraints": inspect_checks(cursor, table),
+                "triggers": inspect_triggers(cursor, table),
+                "referencing_modules": inspect_referencing_modules(cursor, table),
                 "columns": columns,
             }
+            if not columns:
+                report["blocking_issues"].append(f"Required table dbo.{table} does not exist.")
             if missing_insert_columns:
                 report["blocking_issues"].append(
                     f"{table} is missing expected columns: {', '.join(missing_insert_columns)}"
@@ -180,6 +322,25 @@ def main() -> None:
                     f"{foreign_key['referenced_table']}.{foreign_key['referenced_column']} "
                     f"through {foreign_key['constraint']}; automatic ID generation must "
                     "match the ERP's existing master-data rule."
+                )
+            if report["tables"][table]["triggers"]:
+                report["manual_review"].append(
+                    f"Review triggers on dbo.{table}: "
+                    + ", ".join(trigger["name"] for trigger in report["tables"][table]["triggers"])
+                )
+
+        for table, required_columns in REQUIRED_MASTER_COLUMNS.items():
+            columns = inspect_table(cursor, table)
+            actual = {column["name"].lower() for column in columns}
+            missing = [column for column in required_columns if column.lower() not in actual]
+            report["master_tables"][table] = {
+                "exists": bool(columns),
+                "missing_columns": missing,
+                "columns": columns,
+            }
+            if missing:
+                report["blocking_issues"].append(
+                    f"Default master lookup dbo.{table} is missing columns: {', '.join(missing)}"
                 )
 
         report["compatible"] = not report["blocking_issues"]

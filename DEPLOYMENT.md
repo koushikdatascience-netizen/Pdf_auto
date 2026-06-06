@@ -32,6 +32,20 @@ Set-ExecutionPolicy -Scope Process Bypass
 Each customer must have a separate `api_config.json`, API key, approval secret,
 and database connection. Never copy one customer's configuration to another.
 
+Before configuring or inserting into a different ERP database, run the read-only
+compatibility audit:
+
+```powershell
+.\audit_new_database.ps1 `
+  -Server ".\SQLEXPRESS" `
+  -Database "NEW_DATABASE" `
+  -Driver "ODBC Driver 17 for SQL Server"
+```
+
+Review `new_database_audit.json`. Do not enable insertion until
+`compatible` is true and every `manual_review` item has been confirmed with the
+ERP team. This audit does not modify `api_config.json` and performs no writes.
+
 Confirm these ERP-specific values:
 
 ```text

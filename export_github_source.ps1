@@ -40,6 +40,7 @@ $files = @(
   "retry_resolution.ps1",
   "run_agent.py",
   "schema_check.py",
+  "audit_new_database.ps1",
   "db.py",
   "validation.py",
   "mapping_service.py",

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5.1 - 2026-06-06
+
+- Add a separate read-only audit command for onboarding different ERP databases.
+- Audit target/master tables, columns, lengths, precision, keys, foreign keys,
+  checks, triggers, and referencing SQL modules.
+- Prevent new-database auditing from changing the active agent configuration.
+
 ## 1.5.0 - 2026-06-06
 
 - Detect existing supplier/document-number purchases during PDF preview.
