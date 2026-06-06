@@ -6,6 +6,7 @@ import json
 import hashlib
 import logging
 import re
+import sys
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -15,7 +16,8 @@ from typing import Any, Dict
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 import db
 from extract_pdf_json import extract_pdf
@@ -40,7 +42,9 @@ from .models import (
     SupplierMappingRequest,
 )
 from .security import (
+    UI_SESSION_COOKIE,
     create_approval_token,
+    create_ui_session_token,
     payload_digest,
     require_api_key,
     verify_approval_token,
@@ -50,12 +54,25 @@ from .state_store import StateStore
 
 ITEM_SEARCH_ALIASES = {
     "KINGFISHER": ("KFS",),
+    "BAGPIPER": ("BAGPAIPER",),
+    "MCDOWELL": ("MC",),
+    "MCDOWELLS": ("MC",),
+    "V21": ("V 21",),
 }
-ITEM_NAME_NOISE_WORDS = {"ML", "BEER", "LIQUOR", "PRODUCT"}
+ITEM_PHRASE_ALIASES = {
+    "ROYAL STAG": ("RS",),
+    "MCDOWELL S": ("MCDOWELL", "MC"),
+    "MCDOWELL'S": ("MCDOWELL", "MC"),
+}
+ITEM_NAME_NOISE_WORDS = {
+    "ML", "BEER", "WHISKY", "LIQUOR", "PRODUCT", "NEW", "ORIGINAL",
+    "SUPERIOR", "RESERVE", "REG", "NO",
+}
 
 
 def _item_suggestion_terms(source: str) -> list[str]:
-    words = re.findall(r"[A-Z0-9]+", source.upper())
+    normalized_source = " ".join(re.findall(r"[A-Z0-9]+", source.upper()))
+    words = normalized_source.split()
     terms: list[str] = []
     for word in words:
         if len(word) >= 3 and word not in terms:
@@ -63,15 +80,30 @@ def _item_suggestion_terms(source: str) -> list[str]:
         for alias in ITEM_SEARCH_ALIASES.get(word, ()):
             if alias not in terms:
                 terms.append(alias)
-    return terms[:6]
+    for phrase, aliases in ITEM_PHRASE_ALIASES.items():
+        if phrase in normalized_source:
+            for alias in aliases:
+                if alias not in terms:
+                    terms.append(alias)
+    return terms[:8]
 
 
 def _normalized_item_words(value: str) -> set[str]:
-    words = set(re.findall(r"[A-Z0-9]+", value.upper()))
+    tokens = re.findall(r"[A-Z0-9]+", value.upper())
+    normalized_value = " ".join(tokens)
+    words = set(tokens)
+    for index in range(len(tokens) - 1):
+        if len(tokens[index]) == 1 and (
+            len(tokens[index + 1]) == 1 or tokens[index + 1].isdigit()
+        ):
+            words.add(tokens[index] + tokens[index + 1])
     expanded = set(words)
     for word in words:
         expanded.update(ITEM_SEARCH_ALIASES.get(word, ()))
-    return expanded - ITEM_NAME_NOISE_WORDS
+    for phrase, aliases in ITEM_PHRASE_ALIASES.items():
+        if phrase in normalized_value:
+            expanded.update(aliases)
+    return {word for word in expanded - ITEM_NAME_NOISE_WORDS if len(word) > 1}
 
 
 def _rank_item_suggestions(
@@ -116,6 +148,9 @@ def _rank_item_suggestions(
         if strength and item_strength == strength:
             total += 5
             reasons.append(f"exact strength match ({item_strength})")
+        if re.match(r"^[A-Z]", str(row[0]).strip(), re.I):
+            total += 8
+            reasons.append("operational ERP item code")
         return max(0, min(100, total)), reasons, exact_ml
 
     def sort_key(row: Any) -> tuple[float, str]:
@@ -127,7 +162,7 @@ def _rank_item_suggestions(
     ]
     ranked = sorted(related or rows, key=sort_key, reverse=True)
     meaningful = [row for row in ranked if score_details(row)[0] > 0]
-    ranked = (meaningful or ranked)[:10]
+    ranked = (meaningful or ranked)[:5]
     suggestions = []
     for row in ranked:
         score, reasons, exact_ml = score_details(row)
@@ -176,7 +211,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="Local ERP Purchase Integration Agent",
-        version="1.7.0",
+        version="1.9.2",
         docs_url="/docs" if settings.enable_docs else None,
         redoc_url=None,
         openapi_url="/openapi.json" if settings.enable_docs else None,
@@ -186,6 +221,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.store = store
     app.state.mapping_store = mapping_store
     app.state.audit_handler = audit_handler
+    bundle_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    static_dir = bundle_root / "static"
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+    @app.get("/", include_in_schema=False)
+    def operator_ui() -> FileResponse:
+        response = FileResponse(static_dir / "index.html")
+        response.set_cookie(
+            UI_SESSION_COOKIE,
+            create_ui_session_token(settings.api_key),
+            httponly=True,
+            secure=False,
+            samesite="strict",
+            max_age=12 * 60 * 60,
+            path="/",
+        )
+        return response
 
     def open_connection() -> Any:
         if not settings.connection_string:
@@ -227,20 +279,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     for row in cursor.fetchall()
                 ]
             terms = _item_suggestion_terms(str(issue["source"]))
-            conditions = " OR ".join("itemname LIKE ?" for _ in terms)
-            ml_condition = " OR ml = ?" if issue.get("ml") is not None else ""
-            expected_ml = issue.get("ml")
-            if expected_ml is not None:
-                numeric_ml = float(expected_ml)
-                expected_ml = int(numeric_ml) if numeric_ml.is_integer() else numeric_ml
+            searchable_name = (
+                "UPPER(REPLACE(REPLACE(REPLACE(itemname, '.', ''), ' ', ''), '-', ''))"
+            )
+            normalized_terms = [
+                re.sub(r"[^A-Z0-9]", "", term.upper())
+                for term in terms
+                if re.sub(r"[^A-Z0-9]", "", term.upper())
+            ]
+            conditions = " OR ".join(f"{searchable_name} LIKE ?" for _ in normalized_terms)
             cursor.execute(
                 f"""
                 SELECT TOP 100 itemcode, itemname, ml, packing, strengthname
                 FROM dbo.itemmst
-                WHERE ({conditions}){ml_condition}
+                WHERE {conditions}
                 """,
-                *[f"%{term}%" for term in terms],
-                *([expected_ml] if expected_ml is not None else []),
+                *[f"%{term}%" for term in normalized_terms],
             )
             return _rank_item_suggestions(
                 cursor.fetchall(),
@@ -312,6 +366,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         preview_results = []
         resolution_issues = []
         duplicates = []
+        duplicate_keys = set()
         for invoice in invoices:
             issues = inspect_purchase_mappings(
                 invoice,
@@ -363,13 +418,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 cursor.close()
                 connection.rollback()
             if existing:
-                duplicates.append(
-                    {
-                        "suppliercode": preview_data["suppliercode"],
-                        "docno": preview_data["docno"],
-                        **existing,
-                    }
+                duplicate = {
+                    "suppliercode": preview_data["suppliercode"],
+                    "docno": preview_data["docno"],
+                    **existing,
+                }
+                duplicate_key = (
+                    duplicate["suppliercode"],
+                    duplicate["docno"],
+                    duplicate.get("trnid"),
+                    duplicate.get("trnno"),
                 )
+                if duplicate_key not in duplicate_keys:
+                    duplicate_keys.add(duplicate_key)
+                    duplicates.append(duplicate)
                 continue
             preview_results.append((invoice, preview_data))
         if resolution_issues:

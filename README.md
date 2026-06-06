@@ -74,6 +74,15 @@ The API will listen on:
 http://127.0.0.1:47831
 ```
 
+This opens the local Purchase Import operator screen. Paste the `api_key` from
+the private `api_config.json`, choose the company and year, and upload a PDF.
+The screen shows duplicate results, unresolved master mappings, ERP search
+results, the complete validated purchase preview, and the final Insert action.
+
+The operator screen only maps to existing ERP suppliers and items. If an item
+does not exist, create it through the ERP Item Master screen, then search and
+map it in Purchase Import. The importer never creates item-master rows.
+
 Check a running agent:
 
 ```powershell

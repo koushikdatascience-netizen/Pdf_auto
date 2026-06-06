@@ -70,6 +70,7 @@ $files = @(
 
 $directories = @(
   "integration_api",
+  "static",
   ".github"
 )
 

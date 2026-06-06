@@ -14,6 +14,7 @@ if (-not (Test-Path -LiteralPath $python)) {
   --name ERP-Purchase-Agent `
   --hidden-import integration_api.main `
   --collect-all pymupdf `
+  --add-data "static;static" `
   run_agent.py
 
 Write-Host "Release executable: dist\ERP-Purchase-Agent.exe" -ForegroundColor Green

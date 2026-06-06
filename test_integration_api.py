@@ -180,6 +180,19 @@ class IntegrationApiTests(unittest.TestCase):
         response = self.client.get("/api/v1/health")
         self.assertEqual(response.status_code, 401)
 
+    def test_operator_ui_is_served_without_exposing_api_key(self):
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Purchase Import", response.text)
+        self.assertNotIn(self.settings.api_key, response.text)
+        self.assertIn("erp_agent_session=", response.headers["set-cookie"])
+        self.assertIn("HttpOnly", response.headers["set-cookie"])
+
+    def test_operator_ui_session_authenticates_api_without_exposing_key(self):
+        self.client.get("/")
+        response = self.client.get("/api/v1/health")
+        self.assertEqual(response.status_code, 200)
+
     def test_item_suggestions_expand_abbreviation_and_prioritize_exact_ml(self):
         self.assertIn("KFS", _item_suggestion_terms("KINGFISHER STRONG PREMIUM BEER"))
         ranked = _rank_item_suggestions(
@@ -195,6 +208,28 @@ class IntegrationApiTests(unittest.TestCase):
         self.assertEqual(ranked[0]["confidence"], "medium")
         self.assertTrue(ranked[0]["requires_user_confirmation"])
         self.assertIn("exact ML match (650)", ranked[0]["match_reasons"])
+
+    def test_item_suggestions_handle_erp_aliases_and_prefer_operational_codes(self):
+        royal = _rank_item_suggestions(
+            [
+                ("100341", "R.S. WHISKY 180 ML", 180, 48, "25 UP"),
+                ("R00040", "R.S. WHISKY 180 ML", 180, 48, "25 UP"),
+                ("100360", "ROYAL CHALLANGE 180 ML", 180, 48, "25 UP"),
+            ],
+            "SEAGRAM'S ROYAL STAG SUPERIOR WHISKY (NEW)",
+            180,
+        )
+        self.assertEqual(royal[0]["itemcode"], "R00040")
+
+        bagpiper = _rank_item_suggestions(
+            [
+                ("100062", "BAGPAIPER 375 ML", 375, 24, "25 UP"),
+                ("B00139", "BAGPAIPER 375 ML", 375, 24, "25 UP"),
+            ],
+            "Bagpiper Deluxe Whisky",
+            375,
+        )
+        self.assertEqual(bagpiper[0]["itemcode"], "B00139")
 
     def test_supplier_mapping_is_verified_saved_and_available_without_restart(self):
         saved = self.client.post(

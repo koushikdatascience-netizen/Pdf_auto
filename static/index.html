@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ERP Purchase Import</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <span class="product-mark">PI</span>
+        <div>
+          <h1>Purchase Import</h1>
+          <p>PDF review and ERP master mapping</p>
+        </div>
+      </div>
+      <div id="healthBadge" class="health neutral">Agent not checked</div>
+    </header>
+
+    <nav class="workflow" aria-label="Purchase import progress">
+      <div class="workflow-step active" data-step="upload"><span>1</span><strong>Upload</strong><small>Select invoice PDF</small></div>
+      <div class="workflow-step" data-step="resolve"><span>2</span><strong>Resolve</strong><small>Confirm ERP masters</small></div>
+      <div class="workflow-step" data-step="review"><span>3</span><strong>Review</strong><small>Verify final changes</small></div>
+      <div class="workflow-step" data-step="complete"><span>4</span><strong>Complete</strong><small>ERP insertion receipt</small></div>
+    </nav>
+
+    <main class="layout">
+      <aside class="sidebar">
+        <section class="settings">
+          <h2>Connection</h2>
+          <div class="local-session"><span class="session-dot"></span><div><strong>Secure local session</strong><small>Authentication is handled automatically on this computer.</small></div></div>
+          <div class="field-row">
+            <label>Company<input id="companyCode" value="2"></label>
+            <label>Year<input id="yearCode" value="8"></label>
+          </div>
+          <label class="check"><input id="strictTotal" type="checkbox" checked> Require exact totals</label>
+          <button id="checkAgent" class="secondary" type="button">Check agent</button>
+        </section>
+
+        <section class="upload-section">
+          <h2>Invoice PDF</h2>
+          <label id="dropzone" class="dropzone">
+            <input id="pdfInput" type="file" accept="application/pdf,.pdf">
+            <span class="drop-icon">PDF</span>
+            <strong id="fileLabel">Choose or drop a PDF</strong>
+            <small>Maximum size is controlled by the local agent</small>
+          </label>
+          <button id="previewButton" type="button" disabled>Extract and preview</button>
+        </section>
+
+        <div id="status" class="status neutral">Select a PDF to begin.</div>
+      </aside>
+
+      <section class="content">
+        <div class="content-head">
+          <div>
+            <p class="eyebrow">Operator workspace</p>
+            <h2 id="workspaceTitle">Waiting for invoice</h2>
+          </div>
+          <button id="resetButton" class="secondary compact" type="button">New PDF</button>
+        </div>
+        <div id="workspace" class="empty-state">
+          <div class="empty-symbol">PDF</div>
+          <h3>Upload an invoice PDF</h3>
+          <p>The agent will extract it, check duplicates, validate ERP masters, and prepare a database-safe preview.</p>
+        </div>
+      </section>
+    </main>
+
+    <div id="confirmModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+      <div class="modal-panel">
+        <h2 id="confirmTitle">Insert approved purchase?</h2>
+        <div id="confirmSummary" class="confirm-summary"></div>
+        <p>This writes the displayed purchase rows to the configured ERP database. Type <strong>INSERT</strong> to confirm.</p>
+        <input id="confirmText" autocomplete="off" placeholder="INSERT">
+        <div class="modal-actions">
+          <button id="cancelInsert" class="secondary" type="button">Cancel</button>
+          <button id="confirmInsert" type="button" disabled>Insert purchase</button>
+        </div>
+      </div>
+    </div>
+    <div id="toast" class="toast hidden" role="status"></div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

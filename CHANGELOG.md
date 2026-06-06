@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.9.2 - 2026-06-06
+
+- Show each existing ERP duplicate purchase only once when a PDF contains
+  multiple manufacturer groups linked to the same document.
+
+## 1.9.1 - 2026-06-06
+
+- Remove the API-key prompt from the localhost operator screen.
+- Authenticate browser users automatically with a signed HttpOnly same-site session.
+- Keep API-key authentication unchanged for the ERP EXE and external API clients.
+
+## 1.9.0 - 2026-06-06
+
+- Add an operator workflow tracker from upload through committed insertion.
+- Show mapping completion progress and master-resolution statistics.
+- Show the exact database row changes and validated net value before approval.
+- Add a professional insertion receipt with generated ERP transaction IDs.
+- Improve session-security messaging, responsive layout, and status feedback.
+
+## 1.8.0 - 2026-06-06
+
+- Add a local Purchase Import operator UI at `http://127.0.0.1:47831`.
+- Support PDF upload, duplicate display, ERP master search and verified mapping.
+- Retry saved resolution sessions without uploading the PDF again.
+- Show complete validated purchase, item, tax, and total previews before insert.
+- Require typed approval before transactional insertion.
+- Keep item creation exclusively inside the ERP Item Master screen.
+
 ## 1.7.0 - 2026-06-06
 
 - Keep item-master creation exclusively inside the ERP EXE.
