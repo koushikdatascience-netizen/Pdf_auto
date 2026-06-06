@@ -157,6 +157,11 @@ def parse_items(lines):
                 label, batch = split_label_batch(combined)
                 items[-1]["label_name"] = label
                 items[-1]["batch"] = batch or items[-1]["batch"]
+            else:
+                # Manufacturer names differ between PDFs and may not use a
+                # recognizable prefix. Text after the final item row and
+                # before its Total line belongs to that manufacturer group.
+                current_group_lines.append(line)
 
         i += 1
 

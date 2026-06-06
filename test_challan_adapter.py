@@ -1,6 +1,7 @@
 import unittest
 
 from challan_adapter import AdapterError, adapt_challan, build_mapping_template, item_override_key
+from extract_pdf_json import parse_items
 
 
 class ChallanAdapterTests(unittest.TestCase):
@@ -133,6 +134,34 @@ class ChallanAdapterTests(unittest.TestCase):
                 yearcode="2026-27",
                 item_resolver=lambda item: "ITEM001",
             )
+
+    def test_extracts_manufacturer_without_known_prefix(self):
+        lines = [
+            "1",
+            "GENERIC PRODUCT [FL/2026-2027/0001]",
+            "750",
+            "(Glass",
+            "Bottle)",
+            "2",
+            "10.00",
+            "200.00",
+            "40.00",
+            "ABC TRADERS PRIVATE LIMITED",
+            "INDUSTRIAL AREA CITY",
+            "Total:",
+            "2",
+            "10.00",
+            "200.00",
+            "40.00",
+            "Grand Total",
+        ]
+        items, groups = parse_items(lines)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(
+            groups[0]["manufacturer"],
+            "ABC TRADERS PRIVATE LIMITED INDUSTRIAL AREA CITY",
+        )
 
 
 if __name__ == "__main__":
